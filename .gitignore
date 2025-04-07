@@ -27,6 +27,7 @@
 # Misc
 *.map
 *.m
+*.png
 
 # Eclipse CDT project files
 .cproject

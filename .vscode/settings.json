@@ -4,7 +4,7 @@
         "stdio.h": "c",
         "main.h": "c",
         "string.h": "c",
-        "uart.h": "c",
+        "muart.h": "c",
         "adc.h": "c",
         "timer.h": "c",
         "madc.h": "c",

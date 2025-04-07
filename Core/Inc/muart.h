@@ -6,6 +6,7 @@
 
 #ifdef TEST_UART
 void UART_Test_Start(void);
+void send_start_time(void);
 #endif
 
 #endif

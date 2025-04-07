@@ -10,12 +10,8 @@ void UART_Transmit(uint8_t *data, uint16_t size);
 void Print(const char *msg);
 
 // System control prototypes
-void start_system(void);
-void stop_system(void);
-void reset_system(void);
-void restart_system(void);
-void change_trigger_level(uint16_t newLevel);
-void capture_burst(void); // Optional for interrupt mode
-void set_default_trigger_level(void);
+void init_ring_buffers(void);
+void deinit_ring_buffers(void);
+
 
 #endif /* __COMMON_H__ */

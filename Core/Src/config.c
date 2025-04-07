@@ -12,3 +12,8 @@ uint8_t uartTxCompleteFlag = 1;
 uint8_t burstBuffer[BURST_BUFFER_SIZE];
 uint8_t burstIndex = 0;
 
+
+uint8_t adc_ring_buffer_raw[RING_BUFFER_SIZE];
+ring_buffer_t adc_ring_buffer;
+uint8_t gpio_ring_buffer_raw[RING_BUFFER_SIZE];
+ring_buffer_t gpio_ring_buffer;

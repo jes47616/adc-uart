@@ -1,10 +1,11 @@
 import numpy as np
 
 class FrameProcessor:
-    def __init__(self, adc_resolution=12, vref=3.3, sample_rate_ms=1):
+    def __init__(self, adc_resolution=12, vref=3.3, sampling_rate_hz=5000):
         self.adc_resolution = adc_resolution
         self.vref = vref
-        self.sample_rate_ms = sample_rate_ms
+        self.sampling_rate_hz = sampling_rate_hz
+        self.sample_period = 1.0 / sampling_rate_hz  # 0.0002s (200μs)
 
     def parse_frame(self, packet_bytes):
         """
@@ -19,4 +20,5 @@ class FrameProcessor:
         return np.array(voltages)
 
     def generate_time_axis(self, num_samples):
-        return np.array([i * self.sample_rate_ms for i in range(num_samples)])
+        """Generate time axis in seconds based on sampling rate"""
+        return np.linspace(0, num_samples * self.sample_period, num_samples, endpoint=False)
