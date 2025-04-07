@@ -1,0 +1,24 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Create Virtual Environment",
+            "type": "shell",
+            "command": "python -m venv venv"
+        },
+        {
+            "label": "Install Dependencies",
+            "type": "shell",
+            "command": "venv\\Scripts\\pip.exe install -r requirements.txt"
+        },        {
+            "label": "Freeze Dependencies",
+            "type": "shell",
+            "command": "venv\\Scripts\\pip.exe freeze > requirements.txt"
+        },
+        {
+            "label": "Run Serial Reader",
+            "type": "shell",
+            "command": "venv\\Scripts\\python.exe serial_reader.py"
+        }
+    ]
+}

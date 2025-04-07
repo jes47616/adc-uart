@@ -1,0 +1,38 @@
+{
+    "files.associations": {
+        "common.h": "c",
+        "stdio.h": "c",
+        "main.h": "c",
+        "string.h": "c",
+        "uart.h": "c",
+        "adc.h": "c",
+        "timer.h": "c",
+        "madc.h": "c",
+        "bit": "c",
+        "compare": "c",
+        "complex": "c",
+        "cstddef": "c",
+        "fstream": "c",
+        "iterator": "c",
+        "limits": "c",
+        "memory": "c",
+        "sstream": "c",
+        "system_error": "c",
+        "type_traits": "c",
+        "vector": "c",
+        "xiosbase": "c",
+        "xlocale": "c",
+        "xutility": "c",
+        "gpio.h": "c",
+        "mgpio.h": "c",
+        "config.h": "c",
+        "state_handlers.h": "c",
+        "handlers.h": "c"
+    },
+    "C_Cpp.default.includePath": [
+        "${workspaceFolder}/Core/Inc",
+        "${workspaceFolder}/Drivers/CMSIS/Device/ST/STM32G4xx/Include",
+        "${workspaceFolder}/Drivers/CMSIS/Include",
+        "${workspaceFolder}/Drivers/STM32G4xx_HAL_Driver/Inc"
+    ]
+}
