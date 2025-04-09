@@ -30,6 +30,10 @@ class LivePlotter(QWidget):
         self.time_data = []
         self.voltage_data = []
         self.gpio_lines = []
+        
+        # Digital signal data
+        self.digital_time_data = []
+        self.digital_signal_data = []
 
         # Serial Reader and Frame Processor
         self.serial_reader = None
@@ -45,7 +49,24 @@ class LivePlotter(QWidget):
         self.plot_widget.setLabel("left", "Voltage", "V")
         self.plot_widget.setLabel("bottom", "Time", "ms")
         self.plot_widget.setYRange(0, 3.3)
+        
+        # Create a second Y axis for digital signal
+        self.digital_axis = pg.ViewBox()
+        self.plot_widget.scene().addItem(self.digital_axis)
+        self.plot_widget.getAxis("right").linkToView(self.digital_axis)
+        self.plot_widget.getAxis("right").setLabel("Digital Signal")
+        self.digital_axis.setYRange(-0.1, 1.1)  # For boolean values (0-1)
+        
+        # Link X axes
+        self.digital_axis.setXLink(self.plot_widget.getViewBox())
+        
+        # Create curves for both signals
         self.adc_curve = self.plot_widget.plot(pen=pg.mkPen("b", width=2))
+        self.digital_curve = pg.PlotCurveItem(pen=pg.mkPen("r", width=2))
+        self.digital_axis.addItem(self.digital_curve)
+        
+        # Update views on resize
+        self.plot_widget.getViewBox().sigResized.connect(self._update_views)
 
         # --- Controls ---
         self.port_selector = QComboBox()
@@ -83,6 +104,10 @@ class LivePlotter(QWidget):
         self.setLayout(layout)
         self.set_controls_enabled(True)
 
+    def _update_views(self):
+        # Update the second ViewBox when the first one changes
+        self.digital_axis.setGeometry(self.plot_widget.getViewBox().sceneBoundingRect())
+        self.digital_axis.linkedViewChanged(self.plot_widget.getViewBox(), self.digital_axis.XAxis)
 
     def start_plotting(self):
         if not self.is_running:
@@ -90,8 +115,11 @@ class LivePlotter(QWidget):
             self.set_controls_enabled(False)  # Disable other controls
             self.time_data.clear()
             self.voltage_data.clear()
+            self.digital_time_data.clear()
+            self.digital_signal_data.clear()
             self.clear_gpio_lines()
             self.adc_curve.setData([], [])
+            self.digital_curve.setData([], [])
             self.start_time_us = None
             print("[INFO] Plotting started.")
             self.send_command(START_CMD)
@@ -141,9 +169,7 @@ class LivePlotter(QWidget):
         self.log_output.append(hex_str)
 
     def handle_packet(self, packet):
-        if len(packet) != 21:
-            print(f"Invalid packet size: {len(packet)} bytes")
-            return
+        print(f"Packet header: 0x{packet[0]:02X}")
         
         self.log_packet(packet)
 
@@ -152,9 +178,17 @@ class LivePlotter(QWidget):
 
         if header == 0xC0:  # Start timestamp
             if len(data) >= 4:
-                self.start_time_us = int.from_bytes(data[:3], byteorder="little")
+                self.start_time_us = int.from_bytes(data[:4], byteorder="little")  # Use all 4 bytes for timestamp
                 self.time_data.clear()
                 self.voltage_data.clear()
+                self.digital_time_data.clear()
+                self.digital_signal_data.clear()
+                
+                # Initialize digital signal with a starting point at time 0
+                self.digital_time_data.append(0)
+                self.digital_signal_data.append(0)  # Assume starting at LOW
+                self.digital_curve.setData(self.digital_time_data, self.digital_signal_data)
+                
                 self.clear_gpio_lines()
                 self.adc_curve.setData([], [])
                 print(f"[SYNC] Start time: {self.start_time_us} µs")
@@ -168,7 +202,7 @@ class LivePlotter(QWidget):
                     voltages = self.frame_processor.parse_frame(data)
                     sample_interval_us = 1000  # Adjust as needed
                     last_time = self.time_data[-1] if self.time_data else 0
-                    times = [last_time + i * (sample_interval_us / 1000.0) for i in range(len(voltages))]
+                    times = [last_time + (i * sample_interval_us / 1000.0) for i in range(1, len(voltages) + 1)]
                     self.time_data.extend(times)
                     self.voltage_data.extend(voltages)
                     self.adc_curve.setData(self.time_data, self.voltage_data)
@@ -177,13 +211,38 @@ class LivePlotter(QWidget):
                     return
 
         elif header == 0xB0 and self.start_time_us is not None:
-            if len(data) % 5 == 0:
+            print(f"[DEBUG] GPIO packet received! Data length: {len(data)} bytes")
+            print(f"[DEBUG] Raw GPIO data: {' '.join([f'{b:02X}' for b in data])}")
+            
+            if len(data) % 5 == 0:  # GPIO event format (timestamp + level)
                 for i in range(0, len(data), 5):
                     ts_bytes = data[i:i+4]
                     level = data[i+4]
+                    
+                    # Extract the timestamp in microseconds
                     gpio_time_us = int.from_bytes(ts_bytes, byteorder="little")
-                    rel_time_ms = (gpio_time_us - self.start_time_us) / 1000.0
+                    
+                    # Convert to milliseconds for display
+                    rel_time_ms = gpio_time_us / 1000.0
+                    
+                    # Debug print
+                    print(f"[GPIO] Event at {rel_time_ms:.3f} ms, level={level}")
+                    
+                    # Add vertical line for event visualization
                     self.add_gpio_line(rel_time_ms, level)
+                    
+                    # Add point to digital signal plot for continuous visualization
+                    if self.digital_time_data and rel_time_ms > self.digital_time_data[-1]:
+                        # Add a point just before the transition to create a step
+                        self.digital_time_data.append(rel_time_ms - 0.001)
+                        self.digital_signal_data.append(self.digital_signal_data[-1])  # Previous state
+                    
+                    # Add the transition point
+                    self.digital_time_data.append(rel_time_ms)
+                    self.digital_signal_data.append(1 if level else 0)  # Use actual level
+                    
+                    # Update the digital plot
+                    self.digital_curve.setData(self.digital_time_data, self.digital_signal_data)
             else:
                 print(f"Invalid GPIO data size: {len(data)} bytes")
                 return

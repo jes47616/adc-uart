@@ -1,4 +1,3 @@
-
 #include "handlers.h"
 
 void init(void) {
@@ -91,39 +90,50 @@ void handle_sample()
 
 void handle_transmitt()
 {
+    static uint8_t tx_buffer_gpio[21];
+    static uint8_t tx_buffer_adc[21];
     uint8_t adc_values[20] = {0};
     uint8_t gpio_values[20] = {0};
 
     uint8_t adc_ok = ring_buffer_dequeue_arr(&adc_ring_buffer, adc_values, 20);
     uint8_t gpio_ok = ring_buffer_dequeue_arr(&gpio_ring_buffer, gpio_values, 20);
 
+    // Use separate buffers for GPIO and ADC data to avoid conflicts
     
+    // First check for GPIO data
+    if (gpio_ok) {
+        tx_buffer_gpio[0] = 0xB0;  // GPIO header
+        memcpy(&tx_buffer_gpio[1], gpio_values, 20);
+        
+        // Wait for any ongoing transmission to complete
+        while (HAL_UART_GetState(ACTIVE_UART) == HAL_UART_STATE_BUSY_TX) {
+            // Small delay to prevent tight loop
+            for (volatile int i = 0; i < 100; i++);
+        }
+        
+        // Send GPIO data
+        HAL_UART_Transmit_DMA(ACTIVE_UART, tx_buffer_gpio, 21);
+        
+        // Wait for completion before sending ADC data
+        while (HAL_UART_GetState(ACTIVE_UART) == HAL_UART_STATE_BUSY_TX) {
+            // Small delay to prevent tight loop
+            for (volatile int i = 0; i < 100; i++);
+        }
+    }
+    
+    // Then check for ADC data
     if (adc_ok) {
-        uint8_t tx_buffer[21];
-        tx_buffer[0] = 0xA0;
-        memcpy(&tx_buffer[1], adc_values, 20);
-        HAL_UART_Transmit_DMA(ACTIVE_UART, tx_buffer, 21);
+        tx_buffer_adc[0] = 0xA0;  // ADC header
+        memcpy(&tx_buffer_adc[1], adc_values, 20);
+        HAL_UART_Transmit_DMA(ACTIVE_UART, tx_buffer_adc, 21);
     }
     else if (HAL_ADC_GetState(&hadc1) & HAL_ADC_STATE_REG_BUSY)
     {
-        uint8_t tx_buffer[21];
-        memcpy(&tx_buffer, adc_values, 21);
-        tx_buffer[0] = 0xD0;
-        HAL_UART_Transmit_DMA(ACTIVE_UART, tx_buffer, 21);
-    }
-    
-    if (gpio_ok) {
-        uint8_t tx_buffer[21];
-        tx_buffer[0] = 0xB0;
-        memcpy(&tx_buffer[1], gpio_values, 20);
-        HAL_UART_Transmit_DMA(ACTIVE_UART, tx_buffer, 21);
+        tx_buffer_adc[0] = 0xD0;
+        memcpy(&tx_buffer_adc[1], adc_values, 20);
+        HAL_UART_Transmit_DMA(ACTIVE_UART, tx_buffer_adc, 21);
     }
 }
-
-
-
-
-
 
 void handle_gpio_events()
 {

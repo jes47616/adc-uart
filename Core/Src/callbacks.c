@@ -29,18 +29,15 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc)
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
-    if (current_mode == ADC_INTERRUPT_MODE)
+    // Remove the mode check to process GPIO events in all modes
+    // Check if the interrupt is from PA0
+    if (HAL_TIM_Base_GetState(&htim3) == HAL_TIM_STATE_READY && current_mode == ADC_INTERRUPT_MODE)
     {
-
-        // Check if the interrupt is from PA0
-        if (HAL_TIM_Base_GetState(&htim3) == HAL_TIM_STATE_READY)
-        {
-            init();
-        }
-        if (GPIO_Pin == GPIO_PIN_1) // This checks if the interrupt is triggered by PA0
-        {
-            handle_gpio_events();
-        }
+        init();
+    }
+    if (GPIO_Pin == GPIO_PIN_1) // This checks if the interrupt is triggered by PA1
+    {
+        handle_gpio_events();
     }
 }
 
