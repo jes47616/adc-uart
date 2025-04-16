@@ -10,7 +10,8 @@
             "label": "Install Dependencies",
             "type": "shell",
             "command": "venv\\Scripts\\pip.exe install -r py\\requirements.txt"
-        },        {
+        },        
+        {
             "label": "Freeze Dependencies",
             "type": "shell",
             "command": "venv\\Scripts\\pip.exe freeze > py\\requirements.txt"
@@ -19,7 +20,26 @@
             "label": "Run Serial Reader",
             "type": "shell",
             "command": "venv\\Scripts\\python.exe py\\main.py"
-    
+        },
+        {
+            "label": "macOS: Create Virtual Environment",
+            "type": "shell",
+            "command": "python3 -m venv venv"
+        },
+        {
+            "label": "macOS: Install Dependencies",
+            "type": "shell",
+            "command": "venv/bin/pip3 install -r py/requirements.txt"
+        },        
+        {
+            "label": "macOS: Freeze Dependencies",
+            "type": "shell",
+            "command": "venv/bin/pip3 freeze > py/requirements.txt"
+        },
+        {
+            "label": "macOS: Run Serial Reader",
+            "type": "shell",
+            "command": "venv/bin/python3 py/main.py"
         }
     ]
 }

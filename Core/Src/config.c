@@ -17,3 +17,6 @@ uint8_t adc_ring_buffer_raw[RING_BUFFER_SIZE];
 ring_buffer_t adc_ring_buffer;
 uint8_t gpio_ring_buffer_raw[RING_BUFFER_SIZE];
 ring_buffer_t gpio_ring_buffer;
+
+uint32_t times[5000] = {0};
+uint16_t times_index = 0;

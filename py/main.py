@@ -200,11 +200,21 @@ class LivePlotter(QWidget):
             if self.is_running:
                 if len(data) > 0:
                     voltages = self.frame_processor.parse_frame(data)
-                    sample_interval_us = 1000  # Adjust as needed
-                    last_time = self.time_data[-1] if self.time_data else 0
-                    times = [last_time + (i * sample_interval_us / 1000.0) for i in range(1, len(voltages) + 1)]
+
+                    # Generate relative time values in ms using the frame processor
+                    relative_times_ms = self.frame_processor.generate_time_axis(len(voltages)) * 1000.0
+
+                    # Determine where the time continues from
+                    last_time = self.time_data[-1] + self.frame_processor.sample_period * 1000 if self.time_data else 0
+
+                    # Shift the new times to continue smoothly
+                    times = [last_time + t for t in relative_times_ms]
+
+                    # Update time and voltage data
                     self.time_data.extend(times)
                     self.voltage_data.extend(voltages)
+
+                    # Update the plot
                     self.adc_curve.setData(self.time_data, self.voltage_data)
                 else:
                     print("No ADC data found")

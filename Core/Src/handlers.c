@@ -154,3 +154,13 @@ void handle_gpio_events()
         ring_buffer_queue_arr(&gpio_ring_buffer, burstBuffer,5);
 
 }
+
+void capture_times(){
+    uint32_t timestamp = __HAL_TIM_GET_COUNTER(&htim2);
+    if (times_index < 5000) {
+        times[times_index] = timestamp;
+        times_index++;
+    }else {
+        uint8_t value = 0;
+    }
+}

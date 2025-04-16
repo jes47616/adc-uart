@@ -67,6 +67,8 @@ extern ring_buffer_t adc_ring_buffer;
 extern uint8_t gpio_ring_buffer_raw[RING_BUFFER_SIZE];
 extern ring_buffer_t gpio_ring_buffer;
 
+extern uint16_t times_index;
+extern uint32_t times[5000];
 
 
 
