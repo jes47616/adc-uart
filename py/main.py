@@ -15,6 +15,7 @@ import serial.tools.list_ports
 
 from serial_reader import SerialReader
 from frame import FrameProcessor
+import datetime
 
 # Define the command constants
 START_CMD = "START____"
@@ -57,9 +58,7 @@ class LivePlotter(QWidget):
 
         # Create curves for both signals
         self.adc_curve = self.plot_widget.plot([], [], pen=pg.mkPen("b", width=2))
-        self.gpio_curve = self.plot_widget.plot(
-            [], [], pen=pg.mkPen("r", width=2), stepMode=True
-        )
+        self.gpio_curve = self.plot_widget.plot([], [], pen=pg.mkPen("r", width=2))
         # --- Controls ---
         self.port_selector = QComboBox()
         self.refresh_ports()
@@ -218,45 +217,67 @@ class LivePlotter(QWidget):
             print(f"[DEBUG] Raw GPIO data: {' '.join([f'{b:02X}' for b in data])}")
 
             if len(data) % 5 == 0:  # GPIO event format (timestamp + level)
-                for i in range(0, len(data), 5):
-                    ts_bytes = data[i : i + 4]
-                    level = data[i + 4]
-
-                    # Extract the timestamp in microseconds
-                    gpio_time_us = int.from_bytes(ts_bytes, byteorder="little")
-
-                    # Convert to milliseconds for display
-                    rel_time_ms = gpio_time_us / 1000.0
-
-                    # Debug print
-                    print(f"[GPIO] Event at {rel_time_ms:.3f} ms, level={level}")
-
-                    # Add point to digital signal plot for continuous visualization
-                    if self.gpio_time_data and rel_time_ms > self.gpio_time_data[-1]:
-                        # Add a point just before the transition to create a step
-                        self.gpio_time_data.append(rel_time_ms - 0.001)
-                        self.gpio_signal_data.append(
-                            self.gpio_signal_data[-1]
-                        )  # Previous state
-
-                    # Add the transition point
-                    self.gpio_time_data.append(rel_time_ms)
-                    self.gpio_signal_data.append(1 if level else 0)  # Use actual level
-
-                    # Update the digital plot
-                    self.gpio_curve.setData(self.gpio_time_data, self.gpio_signal_data)
+                new_time_data, new_signal_data = self.handle_gpio_data(data)
+                self.gpio_time_data.extend(new_time_data)
+                self.gpio_signal_data.extend(new_signal_data)
+                self.gpio_curve.setData(self.gpio_time_data, self.gpio_signal_data)
             else:
                 print(f"Invalid GPIO data size: {len(data)} bytes")
                 return
 
+    def handle_gpio_data(self, data):
+        # keep last known point so the first transition is drawn correctly
+        timestamps = [self.gpio_time_data[-1]]
+        levels = [self.gpio_signal_data[-1]]
+
+        for i in range(0, len(data), 5):
+            ts_ms = int.from_bytes(data[i : i + 4], byteorder="little") / 1000.0
+            if ts_ms == 0:
+                continue
+
+            level = 0 if not data[i + 4] else 3.3  # already 0 or 1
+
+            # draw a vertical edge only if level changed
+            if levels[-1] != level:
+                timestamps.append(ts_ms)
+                levels.append(levels[-1])  # drop to previous level first
+            timestamps.append(ts_ms)
+            levels.append(level)  # then new level
+
+        return timestamps[1:], levels[1:]
+
     def closeEvent(self, event):
+        # Stop the serial reader first
         if self.serial_reader:
             self.serial_reader.stop()
+
+        # Save GPIO data arrays if available
+        try:
+            if self.gpio_time_data and self.gpio_signal_data:
+                # Create a timestamp for the filename
+                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                filename = f"gpio_data_{timestamp}.csv"
+
+                # Save data as CSV file with time,value pairs
+                with open(filename, "w") as f:
+                    f.write("Time_ms,Signal_Level\n")  # Header
+                    for t, v in zip(self.gpio_time_data, self.gpio_signal_data):
+                        f.write(f"{t:.6f},{v:.6f}\n")
+
+                print(f"[INFO] GPIO data saved to {filename}")
+        except Exception as e:
+            print(f"[ERROR] Failed to save GPIO data: {str(e)}")
+
         event.accept()
 
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     win = LivePlotter()
+    win.show()
+    win.show()
+    sys.exit(app.exec_())
+
+    win.show()
     win.show()
     sys.exit(app.exec_())
