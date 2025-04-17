@@ -12,6 +12,7 @@
             "command": "venv\\Scripts\\pip.exe install -r py\\requirements.txt"
         },        
         {
+
             "label": "Freeze Dependencies",
             "type": "shell",
             "command": "venv\\Scripts\\pip.exe freeze > py\\requirements.txt"
