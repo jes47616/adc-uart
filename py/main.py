@@ -231,7 +231,7 @@ class LivePlotter(QWidget):
         levels = [self.gpio_signal_data[-1]]
 
         for i in range(0, len(data), 5):
-            ts_ms = int.from_bytes(data[i : i + 4], byteorder="little") / 1000.0
+            ts_ms = int.from_bytes(data[i : i + 4], byteorder="little") * 2 / 1000.0
             if ts_ms == 0:
                 continue
 
