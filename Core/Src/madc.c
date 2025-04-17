@@ -1,5 +1,5 @@
 #include "madc.h"
-#include "uart.h"   // For UART DMA transmit
+#include "muart.h"   // For UART DMA transmit
 #include "common.h"  // For print, UART_TRANSMIT, etc.
 
 #ifdef TEST_ADC

@@ -11,6 +11,9 @@ void handle_command();
 void handle_sample();
 void handle_transmitt();
 
+void init(void);
+
+
 
 
 #endif

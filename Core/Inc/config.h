@@ -2,6 +2,7 @@
 #define __CONFIG_H__
 
 #include "main.h"
+#include "ringbuffer.h"
 
 // Debug mode flag
 #define DEBUG_MODE 1
@@ -31,7 +32,7 @@ extern DMA_HandleTypeDef hdma_usart1_tx;
 extern DMA_HandleTypeDef hdma_usart2_tx;
 
 // ADC Configuration
-#define ADC_BUFFER_SIZE 600
+#define ADC_BUFFER_SIZE 10
 extern uint16_t adcBuffer[ADC_BUFFER_SIZE];
 extern volatile uint8_t adcReadyToSend;
 
@@ -49,15 +50,27 @@ extern uint8_t uartTxCompleteFlag;
 // Command strings
 #define START____ "START____"
 #define STOP_____ "STOP_____"
-#define RESET____ "RESET____"
 #define TRGMODE__ "TRGMODE__"
 #define INTMODE__ "INTMODE__"
 
 // GPIO Burst Settings
-#define BURST_SIZE 10
-#define BURST_BUFFER_SIZE (BURST_SIZE * 5)
+#define BURST_BUFFER_SIZE 5
 extern uint8_t burstBuffer[BURST_BUFFER_SIZE];
-extern uint8_t burstIndex;
+
+
+
+// Ring Buffers
+
+#define RING_BUFFER_SIZE 10000
+extern uint8_t adc_ring_buffer_raw[RING_BUFFER_SIZE];
+extern ring_buffer_t adc_ring_buffer;
+extern uint8_t gpio_ring_buffer_raw[RING_BUFFER_SIZE];
+extern ring_buffer_t gpio_ring_buffer;
+
+extern uint16_t times_index;
+extern uint32_t times[5000];
+
+
 
 
 #endif // __CONFIG_H__
