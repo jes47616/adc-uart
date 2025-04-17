@@ -25,7 +25,7 @@ class FrameProcessor:
 
     def generate_time_axis(self, num_samples):
         """Generate time axis in seconds based on sampling rate"""
-        print(f"Generating time axis for {num_samples} samples")
+        # print(f"Generating time axis for {num_samples} samples")
         return np.linspace(
             0, num_samples * self.sample_period, num_samples, endpoint=False
         )

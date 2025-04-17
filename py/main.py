@@ -153,7 +153,7 @@ class LivePlotter(QWidget):
         self.log_output.append(hex_str)
 
     def handle_packet(self, packet):
-        print(f"Packet header: 0x{packet[0]:02X}")
+        # print(f"Packet header: 0x{packet[0]:02X}")
 
         self.log_packet(packet)
 
@@ -207,19 +207,21 @@ class LivePlotter(QWidget):
                     self.adc_signal_data.extend(voltages)
 
                     # Update the plot
+                    # print("Adding ADC data to plot")
                     self.adc_curve.setData(self.adc_time_data, self.adc_signal_data)
                 else:
                     print("No ADC data found")
                     return
 
         elif header == 0xB0 and self.start_time_us is not None:
-            print(f"[DEBUG] GPIO packet received! Data length: {len(data)} bytes")
-            print(f"[DEBUG] Raw GPIO data: {' '.join([f'{b:02X}' for b in data])}")
+            # print(f"[DEBUG] GPIO packet received! Data length: {len(data)} bytes")
+            # print(f"[DEBUG] Raw GPIO data: {' '.join([f'{b:02X}' for b in data])}")
 
             if len(data) % 5 == 0:  # GPIO event format (timestamp + level)
                 new_time_data, new_signal_data = self.handle_gpio_data(data)
                 self.gpio_time_data.extend(new_time_data)
                 self.gpio_signal_data.extend(new_signal_data)
+                # print("Adding GPIO data to plot")
                 self.gpio_curve.setData(self.gpio_time_data, self.gpio_signal_data)
             else:
                 print(f"Invalid GPIO data size: {len(data)} bytes")
@@ -256,17 +258,16 @@ class LivePlotter(QWidget):
             if self.gpio_time_data and self.gpio_signal_data:
                 # Create a timestamp for the filename
                 timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename = f"gpio_data_{timestamp}.csv"
+                filename = f"adc_data_{timestamp}.csv"
 
                 # Save data as CSV file with time,value pairs
                 with open(filename, "w") as f:
                     f.write("Time_ms,Signal_Level\n")  # Header
-                    for t, v in zip(self.gpio_time_data, self.gpio_signal_data):
+                    for t, v in zip(self.adc_time_data, self.adc_signal_data):
                         f.write(f"{t:.6f},{v:.6f}\n")
-
-                print(f"[INFO] GPIO data saved to {filename}")
+                print(f"[INFO] ADC data saved to {filename}")
         except Exception as e:
-            print(f"[ERROR] Failed to save GPIO data: {str(e)}")
+            print(f"[ERROR] Failed to save ADC data: {str(e)}")
 
         event.accept()
 
