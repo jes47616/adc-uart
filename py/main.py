@@ -33,13 +33,12 @@ class LivePlotter(QWidget):
         self.start_time_us = None
 
         # Data buffers
-        self.time_data = []
-        self.voltage_data = []
-        self.gpio_lines = []
+        self.adc_time_data = []
+        self.adc_signal_data = []
 
         # Digital signal data
-        self.digital_time_data = []
-        self.digital_signal_data = []
+        self.gpio_time_data = []
+        self.gpio_signal_data = []
 
         # Serial Reader and Frame Processor
         self.serial_reader = None
@@ -56,26 +55,11 @@ class LivePlotter(QWidget):
         self.plot_widget.setLabel("bottom", "Time", "ms")
         self.plot_widget.setYRange(0, 3.3)
 
-        # Create a second Y axis for digital signal
-        self.digital_axis = pg.ViewBox()
-        self.plot_widget.scene().addItem(self.digital_axis)
-        self.plot_widget.getAxis("right").linkToView(self.digital_axis)
-        self.plot_widget.getAxis("right").setLabel("Digital Signal")
-        self.digital_axis.setYRange(-0.1, 1.1)  # For boolean values (0-1)
-
-        # Link X axes
-        self.digital_axis.setXLink(self.plot_widget.getViewBox())
-
         # Create curves for both signals
-        self.adc_curve = self.plot_widget.plot(pen=pg.mkPen("b", width=2))
-        self.digital_curve = self.plot_widget.plot(
+        self.adc_curve = self.plot_widget.plot([], [], pen=pg.mkPen("b", width=2))
+        self.gpio_curve = self.plot_widget.plot(
             [], [], pen=pg.mkPen("r", width=2), stepMode=True
         )
-        self.digital_axis.addItem(self.digital_curve)
-
-        # Update views on resize
-        self.plot_widget.getViewBox().sigResized.connect(self._update_views)
-
         # --- Controls ---
         self.port_selector = QComboBox()
         self.refresh_ports()
@@ -111,24 +95,16 @@ class LivePlotter(QWidget):
         self.setLayout(layout)
         self.set_controls_enabled(True)
 
-    def _update_views(self):
-        # Update the second ViewBox when the first one changes
-        self.digital_axis.setGeometry(self.plot_widget.getViewBox().sceneBoundingRect())
-        self.digital_axis.linkedViewChanged(
-            self.plot_widget.getViewBox(), self.digital_axis.XAxis
-        )
-
     def start_plotting(self):
         if not self.is_running:
             self.is_running = True
             self.set_controls_enabled(False)  # Disable other controls
-            self.time_data.clear()
-            self.voltage_data.clear()
-            self.digital_time_data.clear()
-            self.digital_signal_data.clear()
-            self.clear_gpio_lines()
+            self.adc_time_data.clear()
+            self.adc_signal_data.clear()
+            self.gpio_time_data.clear()
+            self.gpio_signal_data.clear()
             self.adc_curve.setData([], [])
-            self.digital_curve.setData([], [])
+            self.gpio_curve.setData([], [])
             self.start_time_us = None
             print("[INFO] Plotting started.")
             self.send_command(START_CMD)
@@ -190,19 +166,16 @@ class LivePlotter(QWidget):
                 self.start_time_us = int.from_bytes(
                     data[:4], byteorder="little"
                 )  # Use all 4 bytes for timestamp
-                self.time_data.clear()
-                self.voltage_data.clear()
-                self.digital_time_data.clear()
-                self.digital_signal_data.clear()
+                self.adc_time_data.clear()
+                self.adc_signal_data.clear()
+                self.gpio_time_data.clear()
+                self.gpio_signal_data.clear()
 
                 # Initialize digital signal with a starting point at time 0
-                self.digital_time_data.append(0)
-                self.digital_signal_data.append(0)  # Assume starting at LOW
-                self.digital_curve.setData(
-                    self.digital_time_data, self.digital_signal_data
-                )
+                self.gpio_time_data.append(0)
+                self.gpio_signal_data.append(0)  # Assume starting at LOW
+                self.gpio_curve.setData(self.gpio_time_data, self.gpio_signal_data)
 
-                self.clear_gpio_lines()
                 self.adc_curve.setData([], [])
                 print(f"[SYNC] Start time: {self.start_time_us} µs")
             else:
@@ -221,8 +194,9 @@ class LivePlotter(QWidget):
 
                     # Determine where the time continues from
                     last_time = (
-                        self.time_data[-1] + self.frame_processor.sample_period * 1000
-                        if self.time_data
+                        self.adc_time_data[-1]
+                        + self.frame_processor.sample_period * 1000
+                        if self.adc_time_data
                         else 0
                     )
 
@@ -230,11 +204,11 @@ class LivePlotter(QWidget):
                     times = [last_time + t for t in relative_times_ms]
 
                     # Update time and voltage data
-                    self.time_data.extend(times)
-                    self.voltage_data.extend(voltages)
+                    self.adc_time_data.extend(times)
+                    self.adc_signal_data.extend(voltages)
 
                     # Update the plot
-                    self.adc_curve.setData(self.time_data, self.voltage_data)
+                    self.adc_curve.setData(self.adc_time_data, self.adc_signal_data)
                 else:
                     print("No ADC data found")
                     return
@@ -257,46 +231,23 @@ class LivePlotter(QWidget):
                     # Debug print
                     print(f"[GPIO] Event at {rel_time_ms:.3f} ms, level={level}")
 
-                    # Add vertical line for event visualization
-                    self.add_gpio_line(rel_time_ms, level)
-
                     # Add point to digital signal plot for continuous visualization
-                    if (
-                        self.digital_time_data
-                        and rel_time_ms > self.digital_time_data[-1]
-                    ):
+                    if self.gpio_time_data and rel_time_ms > self.gpio_time_data[-1]:
                         # Add a point just before the transition to create a step
-                        self.digital_time_data.append(rel_time_ms - 0.001)
-                        self.digital_signal_data.append(
-                            self.digital_signal_data[-1]
+                        self.gpio_time_data.append(rel_time_ms - 0.001)
+                        self.gpio_signal_data.append(
+                            self.gpio_signal_data[-1]
                         )  # Previous state
 
                     # Add the transition point
-                    self.digital_time_data.append(rel_time_ms)
-                    self.digital_signal_data.append(
-                        1 if level else 0
-                    )  # Use actual level
+                    self.gpio_time_data.append(rel_time_ms)
+                    self.gpio_signal_data.append(1 if level else 0)  # Use actual level
 
                     # Update the digital plot
-                    self.digital_curve.setData(
-                        self.digital_time_data, self.digital_signal_data
-                    )
+                    self.gpio_curve.setData(self.gpio_time_data, self.gpio_signal_data)
             else:
                 print(f"Invalid GPIO data size: {len(data)} bytes")
                 return
-
-    def add_gpio_line(self, time_ms, level):
-        color = "r" if level else "g"
-        line = pg.InfiniteLine(
-            pos=time_ms, angle=90, pen=pg.mkPen(color, width=1.5, style=Qt.DashLine)
-        )
-        self.plot_widget.addItem(line)
-        self.gpio_lines.append(line)
-
-    def clear_gpio_lines(self):
-        for line in self.gpio_lines:
-            self.plot_widget.removeItem(line)
-        self.gpio_lines.clear()
 
     def closeEvent(self, event):
         if self.serial_reader:
