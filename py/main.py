@@ -83,8 +83,8 @@ class LivePlotter(QWidget):
 
         self.start_btn = QPushButton("Start")
         self.stop_btn = QPushButton("Stop")
-        self.trgmode_btn = QPushButton("Trigger Mode")
-        self.intmode_btn = QPushButton("Internal Mode")
+        self.trgmode_btn = QPushButton("Continuous Mode")
+        self.intmode_btn = QPushButton("Interrupt Mode")
 
         self.start_btn.clicked.connect(self.start_plotting)
         self.stop_btn.clicked.connect(self.stop_plotting)
