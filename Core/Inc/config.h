@@ -32,7 +32,7 @@ extern DMA_HandleTypeDef hdma_usart1_tx;
 extern DMA_HandleTypeDef hdma_usart2_tx;
 
 // ADC Configuration
-#define ADC_BUFFER_SIZE 10
+#define ADC_BUFFER_SIZE 500 //war 10
 extern uint16_t adcBuffer[ADC_BUFFER_SIZE];
 extern volatile uint8_t adcReadyToSend;
 
