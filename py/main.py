@@ -301,7 +301,6 @@ class LivePlotter(QWidget):
                 if v2 != v1:
                     t_zero = t1 + (0 - v1) * (t2 - t1) / (v2 - v1)
                     zero_crossings.append(t_zero)
-        print(f"Zero crossings: {zero_crossings}")
         return zero_crossings
 
     def find_gpio_zero_midpoints(self, time_data, signal_data, arc_end_time):
@@ -341,7 +340,6 @@ class LivePlotter(QWidget):
                 t_rise1 = pulse_rises[-2]
                 t_fall2 = pulse_falls[-1]
                 first_half_duration = (t_fall2 - t_rise1) / 2
-        print(f"First Half Duration: {first_half_duration} ms")
 
         return pair_midpoints, first_half_duration
 
@@ -444,7 +442,7 @@ class LivePlotter(QWidget):
         event.accept()
 
 
-if __name__ == "__main__":
+def main():
     app = QApplication(sys.argv)
     win = LivePlotter()
     win.show()

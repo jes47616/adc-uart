@@ -48,3 +48,5 @@ py/__pycache__
 *.DS_Store
 *.txt
 *.csv
+build
+.egg-info
