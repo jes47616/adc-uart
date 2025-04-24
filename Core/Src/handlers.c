@@ -11,7 +11,7 @@ void init(void) {
 void handle_start_system(void)
 {   
 	handle_reset_system();
-    if(current_mode == ADC_TRIGGER_MODE){
+    if(current_mode == ADC_CONTINUOUS_MODE){
         init();
     }
 }
@@ -70,7 +70,7 @@ void handle_command()
     }
     else if (strcmp(cmd_buffer, TRGMODE__) == 0)
     {
-        current_mode = ADC_TRIGGER_MODE;
+        current_mode = ADC_CONTINUOUS_MODE;
         handle_reset_system();
     }
     else if (strcmp(cmd_buffer, INTMODE__) == 0)
@@ -80,10 +80,11 @@ void handle_command()
     }
     else if (strcmp(cmd_buffer, RESET____) == 0)
     {
+        current_mode = ADC_CONTINUOUS_MODE;
         handle_reset_system();
     }
     // Re-arm UART DMA receive
-    memcpy(uart_rx_buffer, 0, CMD_STR_LEN);
+    memset(uart_rx_buffer, 0, CMD_STR_LEN);
     HAL_UART_Receive_DMA(ACTIVE_UART, uart_rx_buffer, CMD_STR_LEN);
 }
 

@@ -22,6 +22,7 @@ START_CMD = "START____"
 STOP_CMD = "STOP_____"
 TRGMODE_CMD = "TRGMODE__"
 INTMODE_CMD = "INTMODE__"
+RESET_CMD = "RESET____"
 
 
 class LivePlotter(QWidget):
@@ -68,11 +69,13 @@ class LivePlotter(QWidget):
         self.stop_btn = QPushButton("Stop")
         self.trgmode_btn = QPushButton("Continuous Mode")
         self.intmode_btn = QPushButton("Interrupt Mode")
+        self.reset_btn = QPushButton("Reset")
 
         self.start_btn.clicked.connect(self.start_plotting)
         self.stop_btn.clicked.connect(self.stop_plotting)
         self.trgmode_btn.clicked.connect(lambda: self.send_command(TRGMODE_CMD))
         self.intmode_btn.clicked.connect(lambda: self.send_command(INTMODE_CMD))
+        self.reset_btn.clicked.connect(lambda: self.send_command(RESET_CMD))
 
         btn_layout = QHBoxLayout()
         btn_layout.addWidget(self.port_selector)
@@ -80,6 +83,7 @@ class LivePlotter(QWidget):
         btn_layout.addWidget(self.stop_btn)
         btn_layout.addWidget(self.trgmode_btn)
         btn_layout.addWidget(self.intmode_btn)
+        btn_layout.addWidget(self.reset_btn)
 
         self.log_output = QTextEdit()
         self.log_output.setReadOnly(True)
@@ -114,6 +118,7 @@ class LivePlotter(QWidget):
         self.intmode_btn.setEnabled(enabled)
         self.start_btn.setEnabled(enabled)
         self.stop_btn.setEnabled(not enabled)  # Stop enabled only when plotting
+        self.reset_btn.setEnabled(enabled)
 
     def stop_plotting(self):
         if self.is_running:

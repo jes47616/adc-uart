@@ -39,7 +39,7 @@ extern volatile uint8_t adcReadyToSend;
 // UART Configuration
 #define CMD_STR_LEN 9
 typedef enum {
-    ADC_TRIGGER_MODE,
+    ADC_CONTINUOUS_MODE,
     ADC_INTERRUPT_MODE
 } TriggerMode_t;
 
