@@ -297,7 +297,7 @@ class LivePlotter(QWidget):
                     zero_crossings.append(t_zero)
         return zero_crossings
 
-    def find_gpio_zero_midpoints(self, time_data, signal_data):
+    def find_gpio_zero_midpoints(self, time_data, signal_data, arc_end_time):
         raw_midpoints = []
         pulse_rises = []
         pulse_falls = []
@@ -306,6 +306,8 @@ class LivePlotter(QWidget):
 
         # Step 1: Detect all single pulse midpoints
         for i in range(1, len(signal_data)):
+            if time_data[i] < arc_end_time:
+                continue
             if signal_data[i - 1] == 0 and signal_data[i] == 1:
                 pulse_start = time_data[i]
                 pulse_rises.append(pulse_start)
@@ -368,11 +370,11 @@ class LivePlotter(QWidget):
 
     def process_analysis(self):
         adc_zeros = self.find_zero_crossings(self.adc_time_data, self.adc_signal_data)
-        gpio_midpoints, gpio_first_half_duration = self.find_gpio_zero_midpoints(
-            self.gpio_time_data, self.gpio_signal_data
-        )
         arc_start, arc_end = self.detect_arc_duration(
             self.gpio_time_data, self.gpio_signal_data
+        )
+        gpio_midpoints, gpio_first_half_duration = self.find_gpio_zero_midpoints(
+            self.gpio_time_data, self.gpio_signal_data, arc_end
         )
 
         duration = (
