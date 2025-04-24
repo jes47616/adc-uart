@@ -262,7 +262,7 @@ class LivePlotter(QWidget):
             if ts_ms == 0:
                 continue
 
-            level = 0 if not data[i + 4] else 3.3  # already 0 or 1
+            level = 0 if not data[i + 4] else 1  # already 0 or 1
 
             # draw a vertical edge only if level changed
             if levels[-1] != level:
