@@ -75,7 +75,8 @@ class LivePlotter(QWidget):
         self.stop_btn.clicked.connect(self.stop_plotting)
         self.trgmode_btn.clicked.connect(lambda: self.send_command(TRGMODE_CMD))
         self.intmode_btn.clicked.connect(lambda: self.send_command(INTMODE_CMD))
-        self.reset_btn.clicked.connect(lambda: self.send_command(RESET_CMD))
+        # self.reset_btn.clicked.connect(lambda: self.send_command(RESET_CMD))
+        self.reset_btn.clicked.connect(self.reset_plotting)
 
         btn_layout = QHBoxLayout()
         btn_layout.addWidget(self.port_selector)
@@ -98,17 +99,20 @@ class LivePlotter(QWidget):
         self.setLayout(layout)
         self.set_controls_enabled(True)
 
+    def clear_plot(self):
+        self.adc_time_data.clear()
+        self.adc_signal_data.clear()
+        self.gpio_time_data.clear()
+        self.gpio_signal_data.clear()
+        self.adc_curve.setData([], [])
+        self.gpio_curve.setData([], [])
+        self.start_time_us = None
+
     def start_plotting(self):
         if not self.is_running:
             self.is_running = True
             self.set_controls_enabled(False)  # Disable other controls
-            self.adc_time_data.clear()
-            self.adc_signal_data.clear()
-            self.gpio_time_data.clear()
-            self.gpio_signal_data.clear()
-            self.adc_curve.setData([], [])
-            self.gpio_curve.setData([], [])
-            self.start_time_us = None
+            self.clear_plot()
             print("[INFO] Plotting started.")
             self.send_command(START_CMD)
 
@@ -126,6 +130,19 @@ class LivePlotter(QWidget):
             self.set_controls_enabled(True)  # Re-enable other controls
             print("[INFO] Plotting stopped.")
             self.send_command(STOP_CMD)
+
+    def reset_plotting(self):
+        if self.is_running:
+            self.is_running = False
+            self.set_controls_enabled(True)  # Re-enable other controls
+            print("[INFO] Plotting stopped.")
+            self.send_command(RESET_CMD)
+            self.reset_log_output()
+            self.clear_plot()
+        else:
+            print("[INFO] Plotting is not running.")
+            self.reset_log_output()
+            self.clear_plot()
 
     def refresh_ports(self):
         ports = serial.tools.list_ports.comports()
@@ -156,6 +173,9 @@ class LivePlotter(QWidget):
     def log_packet(self, packet: bytes):
         hex_str = " ".join(f"{b:02X}" for b in packet)
         self.log_output.append(hex_str)
+
+    def reset_log_output(self):
+        self.log_output.clear()
 
     def handle_packet(self, packet):
         # print(f"Packet header: 0x{packet[0]:02X}")
@@ -238,7 +258,7 @@ class LivePlotter(QWidget):
         levels = [self.gpio_signal_data[-1]]
 
         for i in range(0, len(data), 5):
-            ts_ms = int.from_bytes(data[i : i + 4], byteorder="little") * 2 / 1000.0
+            ts_ms = (int.from_bytes(data[i : i + 4], byteorder="little") * 2) / 1000.0
             if ts_ms == 0:
                 continue
 

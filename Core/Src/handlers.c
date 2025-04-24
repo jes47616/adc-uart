@@ -29,8 +29,9 @@ void handle_stop_system(void)
     if (HAL_TIM_Base_GetState(&htim2) != HAL_TIM_STATE_READY)
     {
         HAL_TIM_Base_Stop(&htim2);
+        __HAL_TIM_SET_COUNTER(&htim2, 0); // Reset counter to 0
     }
-
+    
     // Stop Timer 3 if it's running (optional)
     if (HAL_TIM_Base_GetState(&htim3) != HAL_TIM_STATE_READY)
     {

@@ -20,7 +20,7 @@ class FrameProcessor:
         for i in range(0, len(packet_bytes), 2):
             raw = int.from_bytes(packet_bytes[i : i + 2], byteorder="little")
             voltage = (raw / (2**self.adc_resolution - 1)) * self.vref
-            voltages.append(voltage)
+            voltages.append(voltage - 1.65)
         return np.array(voltages)
 
     def generate_time_axis(self, num_samples):
