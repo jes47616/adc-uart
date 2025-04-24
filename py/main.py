@@ -423,21 +423,21 @@ class LivePlotter(QWidget):
         if self.serial_reader:
             self.serial_reader.stop()
 
-        # Save GPIO data arrays if available
-        try:
-            if self.gpio_time_data and self.gpio_signal_data:
-                # Create a timestamp for the filename
-                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename = f"adc_data_{timestamp}.csv"
+        # # Save GPIO data arrays if available
+        # try:
+        #     if self.gpio_time_data and self.gpio_signal_data:
+        #         # Create a timestamp for the filename
+        #         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        #         filename = f"adc_data_{timestamp}.csv"
 
-                # Save data as CSV file with time,value pairs
-                with open(filename, "w") as f:
-                    f.write("Time_ms,Signal_Level\n")  # Header
-                    for t, v in zip(self.adc_time_data, self.adc_signal_data):
-                        f.write(f"{t:.6f},{v:.6f}\n")
-                print(f"[INFO] ADC data saved to {filename}")
-        except Exception as e:
-            print(f"[ERROR] Failed to save ADC data: {str(e)}")
+        #         # Save data as CSV file with time,value pairs
+        #         with open(filename, "w") as f:
+        #             f.write("Time_ms,Signal_Level\n")  # Header
+        #             for t, v in zip(self.adc_time_data, self.adc_signal_data):
+        #                 f.write(f"{t:.6f},{v:.6f}\n")
+        #         print(f"[INFO] ADC data saved to {filename}")
+        # except Exception as e:
+        #     print(f"[ERROR] Failed to save ADC data: {str(e)}")
 
         event.accept()
 
