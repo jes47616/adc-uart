@@ -16,6 +16,8 @@ import serial.tools.list_ports
 from serial_reader import SerialReader
 from frame import FrameProcessor
 import datetime
+from PyQt5.QtWidgets import QListWidget, QListWidgetItem
+
 
 # Define the command constants
 START_CMD = "START____"
@@ -91,10 +93,17 @@ class LivePlotter(QWidget):
         self.log_output.setMinimumHeight(100)
 
         # --- Final Layout ---
+        self.results_list = QListWidget()
+        self.results_list.setMinimumHeight(150)
+
+        self.log_output_results_layout = QHBoxLayout()
+        self.log_output_results_layout.addWidget(self.log_output)
+        self.log_output_results_layout.addWidget(self.results_list)
+
         layout = QVBoxLayout()
         layout.addLayout(btn_layout)
         layout.addWidget(self.plot_widget)
-        layout.addWidget(self.log_output)
+        layout.addLayout(self.log_output_results_layout)
 
         self.setLayout(layout)
         self.set_controls_enabled(True)
@@ -130,6 +139,7 @@ class LivePlotter(QWidget):
             self.set_controls_enabled(True)  # Re-enable other controls
             print("[INFO] Plotting stopped.")
             self.send_command(STOP_CMD)
+            self.process_analysis()
 
     def reset_plotting(self):
         if self.is_running:
@@ -139,6 +149,7 @@ class LivePlotter(QWidget):
             self.send_command(RESET_CMD)
             self.reset_log_output()
             self.clear_plot()
+            self.results_list.clear()
         else:
             print("[INFO] Plotting is not running.")
             self.reset_log_output()
@@ -273,6 +284,104 @@ class LivePlotter(QWidget):
 
         return timestamps[1:], levels[1:]
 
+    def find_zero_crossings(self, time_data, signal_data):
+        zero_crossings = []
+        for i in range(1, len(signal_data)):
+            if (signal_data[i - 1] < 1.65 and signal_data[i] >= 1.65) or (
+                signal_data[i - 1] >= 1.65 and signal_data[i] < 1.65
+            ):
+                t1, v1 = time_data[i - 1], signal_data[i - 1]
+                t2, v2 = time_data[i], signal_data[i]
+                if v2 != v1:
+                    t_zero = t1 + (0 - v1) * (t2 - t1) / (v2 - v1)
+                    zero_crossings.append(t_zero)
+        return zero_crossings
+
+    def find_gpio_zero_midpoints(self, time_data, signal_data):
+        midpoints = []
+        pulse_start = None
+        for i in range(1, len(signal_data)):
+            if signal_data[i - 1] == 0 and signal_data[i] == 1:
+                pulse_start = time_data[i]
+            elif (
+                signal_data[i - 1] == 1
+                and signal_data[i] == 0
+                and pulse_start is not None
+            ):
+                midpoint = (pulse_start + time_data[i]) / 2
+                midpoints.append(midpoint)
+                pulse_start = None
+        return midpoints
+
+    def detect_arc_duration(self, time_data, signal_data):
+        arc_start = None
+        arc_end = None
+        arc_min_duration_ms = 0.05
+        off_threshold_ms = 5.0
+
+        for i in range(1, len(signal_data)):
+            if signal_data[i - 1] == 0 and signal_data[i] == 1:
+                t_high_start = time_data[i]
+            elif signal_data[i - 1] == 1 and signal_data[i] == 0:
+                t_high_end = time_data[i]
+                if (t_high_end - t_high_start) >= arc_min_duration_ms:
+                    arc_start = t_high_start
+                    break
+
+        for i in range(len(signal_data)):
+            if arc_start is not None and signal_data[i] == 0:
+                t_low_start = time_data[i]
+                j = i
+                while j < len(signal_data) and signal_data[j] == 0:
+                    j += 1
+                if (
+                    j < len(signal_data)
+                    and (time_data[j - 1] - t_low_start) >= off_threshold_ms
+                ):
+                    arc_end = t_low_start
+                    break
+
+        return arc_start, arc_end
+
+    def process_analysis(self):
+        adc_zeros = self.find_zero_crossings(self.adc_time_data, self.adc_signal_data)
+        gpio_midpoints = self.find_gpio_zero_midpoints(
+            self.gpio_time_data, self.gpio_signal_data
+        )
+        arc_start, arc_end = self.detect_arc_duration(
+            self.gpio_time_data, self.gpio_signal_data
+        )
+
+        duration = arc_end - arc_start if arc_start and arc_end else None
+
+        # Print to console and log output
+        self.log_output.append("\n--- Analysis Results ---")
+        self.log_output.append(f"ADC Zero-Crossings: {len(adc_zeros)}")
+        for t in adc_zeros:
+            self.log_output.append(f"  ADC Zero @ {t:.3f} ms")
+        self.log_output.append(f"\nLED Pulse Midpoints: {len(gpio_midpoints)}")
+        for t in gpio_midpoints:
+            self.log_output.append(f"  Voltage Zero @ {t:.3f} ms")
+        if duration:
+            self.log_output.append(f"\nArc Duration: {duration:.3f} ms")
+        else:
+            self.log_output.append("Arc Duration: not detected")
+        self.results_list.clear()
+
+        self.results_list.clear()
+        self.results_list.addItem("🔍 ADC Zero-Crossings:")
+        for t in adc_zeros:
+            self.results_list.addItem(f"  • ADC Zero @ {t:.3f} ms")
+
+        self.results_list.addItem("⚡ Voltage Zero-Crossings (LED Midpoints):")
+        for t in gpio_midpoints:
+            self.results_list.addItem(f"  • Voltage Zero @ {t:.3f} ms")
+
+        if duration:
+            self.results_list.addItem(f"🔥 Arc Duration: {duration:.3f} ms")
+        else:
+            self.results_list.addItem("🔥 Arc Duration: not detected")
+
     def closeEvent(self, event):
         # Stop the serial reader first
         if self.serial_reader:
@@ -300,10 +409,5 @@ class LivePlotter(QWidget):
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     win = LivePlotter()
-    win.show()
-    win.show()
-    sys.exit(app.exec_())
-
-    win.show()
     win.show()
     sys.exit(app.exec_())
