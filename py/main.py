@@ -298,20 +298,43 @@ class LivePlotter(QWidget):
         return zero_crossings
 
     def find_gpio_zero_midpoints(self, time_data, signal_data):
-        midpoints = []
+        raw_midpoints = []
+        pulse_rises = []
+        pulse_falls = []
+
         pulse_start = None
+
+        # Step 1: Detect all single pulse midpoints
         for i in range(1, len(signal_data)):
             if signal_data[i - 1] == 0 and signal_data[i] == 1:
                 pulse_start = time_data[i]
+                pulse_rises.append(pulse_start)
             elif (
                 signal_data[i - 1] == 1
                 and signal_data[i] == 0
                 and pulse_start is not None
             ):
-                midpoint = (pulse_start + time_data[i]) / 2
-                midpoints.append(midpoint)
+                pulse_end = time_data[i]
+                raw_midpoints.append((pulse_start + pulse_end) / 2)
+                pulse_falls.append(pulse_end)
                 pulse_start = None
-        return midpoints
+
+        # Step 2: Pair up midpoints and calculate center of pair
+        pair_midpoints = []
+        first_half_duration = None
+
+        for i in range(0, len(raw_midpoints) - 1, 2):
+            mid = (raw_midpoints[i] + raw_midpoints[i + 1]) / 2
+            pair_midpoints.append(mid)
+
+            # Calculate half duration of first pulse pair only
+            if i == 0 and len(pulse_rises) >= 1 and len(pulse_falls) >= 2:
+                t_rise1 = pulse_rises[-2]
+                t_fall2 = pulse_falls[-1]
+                first_half_duration = (t_fall2 - t_rise1) / 2
+        print(f"First Half Duration: {first_half_duration} ms")
+
+        return pair_midpoints, first_half_duration
 
     def detect_arc_duration(self, time_data, signal_data):
         arc_start = None
@@ -345,14 +368,18 @@ class LivePlotter(QWidget):
 
     def process_analysis(self):
         adc_zeros = self.find_zero_crossings(self.adc_time_data, self.adc_signal_data)
-        gpio_midpoints = self.find_gpio_zero_midpoints(
+        gpio_midpoints, gpio_first_half_duration = self.find_gpio_zero_midpoints(
             self.gpio_time_data, self.gpio_signal_data
         )
         arc_start, arc_end = self.detect_arc_duration(
             self.gpio_time_data, self.gpio_signal_data
         )
 
-        duration = arc_end - arc_start if arc_start and arc_end else None
+        duration = (
+            arc_end - arc_start - gpio_first_half_duration
+            if arc_start and arc_end
+            else None
+        )
 
         # Print to console and log output
         self.log_output.append("\n--- Analysis Results ---")
