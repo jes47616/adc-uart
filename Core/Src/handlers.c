@@ -11,7 +11,7 @@ void init(void) {
 void handle_start_system(void)
 {   
 	handle_reset_system();
-    if(current_mode == ADC_TRIGGER_MODE){
+    if(current_mode == ADC_CONTINUOUS_MODE){
         init();
     }
 }
@@ -70,7 +70,7 @@ void handle_command()
     }
     else if (strcmp(cmd_buffer, TRGMODE__) == 0)
     {
-        current_mode = ADC_TRIGGER_MODE;
+        current_mode = ADC_CONTINUOUS_MODE;
         handle_reset_system();
     }
     else if (strcmp(cmd_buffer, INTMODE__) == 0)
@@ -78,8 +78,13 @@ void handle_command()
         current_mode = ADC_INTERRUPT_MODE;
         handle_reset_system();
     }
+    else if (strcmp(cmd_buffer, RESET____) == 0)
+    {
+        current_mode = ADC_CONTINUOUS_MODE;
+        handle_reset_system();
+    }
     // Re-arm UART DMA receive
-    memcpy(uart_rx_buffer, 0, CMD_STR_LEN);
+    memset(uart_rx_buffer, 0, CMD_STR_LEN);
     HAL_UART_Receive_DMA(ACTIVE_UART, uart_rx_buffer, CMD_STR_LEN);
 }
 
@@ -90,50 +95,42 @@ void handle_sample()
 
 void handle_transmitt()
 {
-    static uint8_t tx_buffer_gpio[21];
-    static uint8_t tx_buffer_adc[21];
+    static uint8_t tx_buffer[21];
     uint8_t adc_values[20] = {0};
     uint8_t gpio_values[20] = {0};
 
     uint8_t adc_ok = ring_buffer_dequeue_arr(&adc_ring_buffer, adc_values, 20);
     uint8_t gpio_ok = ring_buffer_dequeue_arr(&gpio_ring_buffer, gpio_values, 20);
 
-    // Use separate buffers for GPIO and ADC data to avoid conflicts
-    
-    // First check for GPIO data
-    if (gpio_ok) {
-        tx_buffer_gpio[0] = 0xB0;  // GPIO header
-        memcpy(&tx_buffer_gpio[1], gpio_values, 20);
-        
-        // Wait for any ongoing transmission to complete
-        while (HAL_UART_GetState(ACTIVE_UART) == HAL_UART_STATE_BUSY_TX) {
-            // Small delay to prevent tight loop
-            for (volatile int i = 0; i < 100; i++);
-        }
-        
-        // Send GPIO data
-        HAL_UART_Transmit_DMA(ACTIVE_UART, tx_buffer_gpio, 21);
-        
-        // Wait for completion before sending ADC data
-        while (HAL_UART_GetState(ACTIVE_UART) == HAL_UART_STATE_BUSY_TX) {
-            // Small delay to prevent tight loop
-            for (volatile int i = 0; i < 100; i++);
-        }
-    }
-    
-    // Then check for ADC data
-    if (adc_ok) {
-        tx_buffer_adc[0] = 0xA0;  // ADC header
-        memcpy(&tx_buffer_adc[1], adc_values, 20);
-        HAL_UART_Transmit_DMA(ACTIVE_UART, tx_buffer_adc, 21);
-    }
-    else if (HAL_ADC_GetState(&hadc1) & HAL_ADC_STATE_REG_BUSY)
+    if (gpio_ok)
     {
-        tx_buffer_adc[0] = 0xD0;
-        memcpy(&tx_buffer_adc[1], adc_values, 20);
-        HAL_UART_Transmit_DMA(ACTIVE_UART, tx_buffer_adc, 21);
+        tx_buffer[0] = 0xB0;  // GPIO header
+        memcpy(&tx_buffer[1], gpio_values, 20);
+        HAL_UART_Transmit_DMA(ACTIVE_UART, tx_buffer, 21);
+    }
+    else if (adc_ok)
+    {
+        tx_buffer[0] = 0xA0;  // ADC header
+        memcpy(&tx_buffer[1], adc_values, 20);
+        HAL_UART_Transmit_DMA(ACTIVE_UART, tx_buffer, 21);
+    }
+    else
+    {
+        // If no data but ADC is still running, send dummy packet
+        if (HAL_ADC_GetState(&hadc1) & HAL_ADC_STATE_REG_BUSY)
+        {
+            tx_buffer[0] = 0xD0;
+            memset(&tx_buffer[1], 0, 20);
+            HAL_UART_Transmit_DMA(ACTIVE_UART, tx_buffer, 21);
+        }
+        else
+        {
+            // No ADC running, no dummy packet needed
+        }
     }
 }
+
+
 
 void handle_gpio_events()
 {

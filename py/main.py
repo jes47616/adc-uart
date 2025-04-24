@@ -15,12 +15,14 @@ import serial.tools.list_ports
 
 from serial_reader import SerialReader
 from frame import FrameProcessor
+import datetime
 
 # Define the command constants
 START_CMD = "START____"
 STOP_CMD = "STOP_____"
 TRGMODE_CMD = "TRGMODE__"
 INTMODE_CMD = "INTMODE__"
+RESET_CMD = "RESET____"
 
 
 class LivePlotter(QWidget):
@@ -33,13 +35,12 @@ class LivePlotter(QWidget):
         self.start_time_us = None
 
         # Data buffers
-        self.time_data = []
-        self.voltage_data = []
-        self.gpio_lines = []
+        self.adc_time_data = []
+        self.adc_signal_data = []
 
         # Digital signal data
-        self.digital_time_data = []
-        self.digital_signal_data = []
+        self.gpio_time_data = []
+        self.gpio_signal_data = []
 
         # Serial Reader and Frame Processor
         self.serial_reader = None
@@ -56,26 +57,9 @@ class LivePlotter(QWidget):
         self.plot_widget.setLabel("bottom", "Time", "ms")
         self.plot_widget.setYRange(0, 3.3)
 
-        # Create a second Y axis for digital signal
-        self.digital_axis = pg.ViewBox()
-        self.plot_widget.scene().addItem(self.digital_axis)
-        self.plot_widget.getAxis("right").linkToView(self.digital_axis)
-        self.plot_widget.getAxis("right").setLabel("Digital Signal")
-        self.digital_axis.setYRange(-0.1, 1.1)  # For boolean values (0-1)
-
-        # Link X axes
-        self.digital_axis.setXLink(self.plot_widget.getViewBox())
-
         # Create curves for both signals
-        self.adc_curve = self.plot_widget.plot(pen=pg.mkPen("b", width=2))
-        self.digital_curve = self.plot_widget.plot(
-            [], [], pen=pg.mkPen("r", width=2), stepMode=True
-        )
-        self.digital_axis.addItem(self.digital_curve)
-
-        # Update views on resize
-        self.plot_widget.getViewBox().sigResized.connect(self._update_views)
-
+        self.adc_curve = self.plot_widget.plot([], [], pen=pg.mkPen("b", width=2))
+        self.gpio_curve = self.plot_widget.plot([], [], pen=pg.mkPen("r", width=2))
         # --- Controls ---
         self.port_selector = QComboBox()
         self.refresh_ports()
@@ -83,13 +67,15 @@ class LivePlotter(QWidget):
 
         self.start_btn = QPushButton("Start")
         self.stop_btn = QPushButton("Stop")
-        self.trgmode_btn = QPushButton("Trigger Mode")
-        self.intmode_btn = QPushButton("Internal Mode")
+        self.trgmode_btn = QPushButton("Continuous Mode")
+        self.intmode_btn = QPushButton("Interrupt Mode")
+        self.reset_btn = QPushButton("Reset")
 
         self.start_btn.clicked.connect(self.start_plotting)
         self.stop_btn.clicked.connect(self.stop_plotting)
         self.trgmode_btn.clicked.connect(lambda: self.send_command(TRGMODE_CMD))
         self.intmode_btn.clicked.connect(lambda: self.send_command(INTMODE_CMD))
+        self.reset_btn.clicked.connect(lambda: self.send_command(RESET_CMD))
 
         btn_layout = QHBoxLayout()
         btn_layout.addWidget(self.port_selector)
@@ -97,6 +83,7 @@ class LivePlotter(QWidget):
         btn_layout.addWidget(self.stop_btn)
         btn_layout.addWidget(self.trgmode_btn)
         btn_layout.addWidget(self.intmode_btn)
+        btn_layout.addWidget(self.reset_btn)
 
         self.log_output = QTextEdit()
         self.log_output.setReadOnly(True)
@@ -111,24 +98,16 @@ class LivePlotter(QWidget):
         self.setLayout(layout)
         self.set_controls_enabled(True)
 
-    def _update_views(self):
-        # Update the second ViewBox when the first one changes
-        self.digital_axis.setGeometry(self.plot_widget.getViewBox().sceneBoundingRect())
-        self.digital_axis.linkedViewChanged(
-            self.plot_widget.getViewBox(), self.digital_axis.XAxis
-        )
-
     def start_plotting(self):
         if not self.is_running:
             self.is_running = True
             self.set_controls_enabled(False)  # Disable other controls
-            self.time_data.clear()
-            self.voltage_data.clear()
-            self.digital_time_data.clear()
-            self.digital_signal_data.clear()
-            self.clear_gpio_lines()
+            self.adc_time_data.clear()
+            self.adc_signal_data.clear()
+            self.gpio_time_data.clear()
+            self.gpio_signal_data.clear()
             self.adc_curve.setData([], [])
-            self.digital_curve.setData([], [])
+            self.gpio_curve.setData([], [])
             self.start_time_us = None
             print("[INFO] Plotting started.")
             self.send_command(START_CMD)
@@ -139,6 +118,7 @@ class LivePlotter(QWidget):
         self.intmode_btn.setEnabled(enabled)
         self.start_btn.setEnabled(enabled)
         self.stop_btn.setEnabled(not enabled)  # Stop enabled only when plotting
+        self.reset_btn.setEnabled(enabled)
 
     def stop_plotting(self):
         if self.is_running:
@@ -178,7 +158,7 @@ class LivePlotter(QWidget):
         self.log_output.append(hex_str)
 
     def handle_packet(self, packet):
-        print(f"Packet header: 0x{packet[0]:02X}")
+        # print(f"Packet header: 0x{packet[0]:02X}")
 
         self.log_packet(packet)
 
@@ -190,19 +170,16 @@ class LivePlotter(QWidget):
                 self.start_time_us = int.from_bytes(
                     data[:4], byteorder="little"
                 )  # Use all 4 bytes for timestamp
-                self.time_data.clear()
-                self.voltage_data.clear()
-                self.digital_time_data.clear()
-                self.digital_signal_data.clear()
+                self.adc_time_data.clear()
+                self.adc_signal_data.clear()
+                self.gpio_time_data.clear()
+                self.gpio_signal_data.clear()
 
                 # Initialize digital signal with a starting point at time 0
-                self.digital_time_data.append(0)
-                self.digital_signal_data.append(0)  # Assume starting at LOW
-                self.digital_curve.setData(
-                    self.digital_time_data, self.digital_signal_data
-                )
+                self.gpio_time_data.append(0)
+                self.gpio_signal_data.append(0)  # Assume starting at LOW
+                self.gpio_curve.setData(self.gpio_time_data, self.gpio_signal_data)
 
-                self.clear_gpio_lines()
                 self.adc_curve.setData([], [])
                 print(f"[SYNC] Start time: {self.start_time_us} µs")
             else:
@@ -221,8 +198,9 @@ class LivePlotter(QWidget):
 
                     # Determine where the time continues from
                     last_time = (
-                        self.time_data[-1] + self.frame_processor.sample_period * 1000
-                        if self.time_data
+                        self.adc_time_data[-1]
+                        + self.frame_processor.sample_period * 1000
+                        if self.adc_time_data
                         else 0
                     )
 
@@ -230,82 +208,82 @@ class LivePlotter(QWidget):
                     times = [last_time + t for t in relative_times_ms]
 
                     # Update time and voltage data
-                    self.time_data.extend(times)
-                    self.voltage_data.extend(voltages)
+                    self.adc_time_data.extend(times)
+                    self.adc_signal_data.extend(voltages)
 
                     # Update the plot
-                    self.adc_curve.setData(self.time_data, self.voltage_data)
+                    # print("Adding ADC data to plot")
+                    self.adc_curve.setData(self.adc_time_data, self.adc_signal_data)
                 else:
                     print("No ADC data found")
                     return
 
         elif header == 0xB0 and self.start_time_us is not None:
-            print(f"[DEBUG] GPIO packet received! Data length: {len(data)} bytes")
-            print(f"[DEBUG] Raw GPIO data: {' '.join([f'{b:02X}' for b in data])}")
+            # print(f"[DEBUG] GPIO packet received! Data length: {len(data)} bytes")
+            # print(f"[DEBUG] Raw GPIO data: {' '.join([f'{b:02X}' for b in data])}")
 
             if len(data) % 5 == 0:  # GPIO event format (timestamp + level)
-                for i in range(0, len(data), 5):
-                    ts_bytes = data[i : i + 4]
-                    level = data[i + 4]
-
-                    # Extract the timestamp in microseconds
-                    gpio_time_us = int.from_bytes(ts_bytes, byteorder="little")
-
-                    # Convert to milliseconds for display
-                    rel_time_ms = gpio_time_us / 1000.0
-
-                    # Debug print
-                    print(f"[GPIO] Event at {rel_time_ms:.3f} ms, level={level}")
-
-                    # Add vertical line for event visualization
-                    self.add_gpio_line(rel_time_ms, level)
-
-                    # Add point to digital signal plot for continuous visualization
-                    if (
-                        self.digital_time_data
-                        and rel_time_ms > self.digital_time_data[-1]
-                    ):
-                        # Add a point just before the transition to create a step
-                        self.digital_time_data.append(rel_time_ms - 0.001)
-                        self.digital_signal_data.append(
-                            self.digital_signal_data[-1]
-                        )  # Previous state
-
-                    # Add the transition point
-                    self.digital_time_data.append(rel_time_ms)
-                    self.digital_signal_data.append(
-                        1 if level else 0
-                    )  # Use actual level
-
-                    # Update the digital plot
-                    self.digital_curve.setData(
-                        self.digital_time_data, self.digital_signal_data
-                    )
+                new_time_data, new_signal_data = self.handle_gpio_data(data)
+                self.gpio_time_data.extend(new_time_data)
+                self.gpio_signal_data.extend(new_signal_data)
+                # print("Adding GPIO data to plot")
+                self.gpio_curve.setData(self.gpio_time_data, self.gpio_signal_data)
             else:
                 print(f"Invalid GPIO data size: {len(data)} bytes")
                 return
 
-    def add_gpio_line(self, time_ms, level):
-        color = "r" if level else "g"
-        line = pg.InfiniteLine(
-            pos=time_ms, angle=90, pen=pg.mkPen(color, width=1.5, style=Qt.DashLine)
-        )
-        self.plot_widget.addItem(line)
-        self.gpio_lines.append(line)
+    def handle_gpio_data(self, data):
+        # keep last known point so the first transition is drawn correctly
+        timestamps = [self.gpio_time_data[-1]]
+        levels = [self.gpio_signal_data[-1]]
 
-    def clear_gpio_lines(self):
-        for line in self.gpio_lines:
-            self.plot_widget.removeItem(line)
-        self.gpio_lines.clear()
+        for i in range(0, len(data), 5):
+            ts_ms = int.from_bytes(data[i : i + 4], byteorder="little") * 2 / 1000.0
+            if ts_ms == 0:
+                continue
+
+            level = 0 if not data[i + 4] else 3.3  # already 0 or 1
+
+            # draw a vertical edge only if level changed
+            if levels[-1] != level:
+                timestamps.append(ts_ms)
+                levels.append(levels[-1])  # drop to previous level first
+            timestamps.append(ts_ms)
+            levels.append(level)  # then new level
+
+        return timestamps[1:], levels[1:]
 
     def closeEvent(self, event):
+        # Stop the serial reader first
         if self.serial_reader:
             self.serial_reader.stop()
+
+        # Save GPIO data arrays if available
+        try:
+            if self.gpio_time_data and self.gpio_signal_data:
+                # Create a timestamp for the filename
+                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                filename = f"adc_data_{timestamp}.csv"
+
+                # Save data as CSV file with time,value pairs
+                with open(filename, "w") as f:
+                    f.write("Time_ms,Signal_Level\n")  # Header
+                    for t, v in zip(self.adc_time_data, self.adc_signal_data):
+                        f.write(f"{t:.6f},{v:.6f}\n")
+                print(f"[INFO] ADC data saved to {filename}")
+        except Exception as e:
+            print(f"[ERROR] Failed to save ADC data: {str(e)}")
+
         event.accept()
 
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     win = LivePlotter()
+    win.show()
+    win.show()
+    sys.exit(app.exec_())
+
+    win.show()
     win.show()
     sys.exit(app.exec_())

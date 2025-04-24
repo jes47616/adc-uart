@@ -5,7 +5,7 @@ uint16_t adcBuffer[ADC_BUFFER_SIZE];
 volatile uint8_t adcReadyToSend = 0;
 
 // UART global variables
-volatile TriggerMode_t current_mode = ADC_TRIGGER_MODE;
+volatile TriggerMode_t current_mode = ADC_CONTINUOUS_MODE;
 uint8_t uart_rx_buffer[CMD_STR_LEN];
 uint8_t uartTxCompleteFlag = 1;
 
