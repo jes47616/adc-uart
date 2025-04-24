@@ -78,6 +78,10 @@ void handle_command()
         current_mode = ADC_INTERRUPT_MODE;
         handle_reset_system();
     }
+    else if (strcmp(cmd_buffer, RESET____) == 0)
+    {
+        handle_reset_system();
+    }
     // Re-arm UART DMA receive
     memcpy(uart_rx_buffer, 0, CMD_STR_LEN);
     HAL_UART_Receive_DMA(ACTIVE_UART, uart_rx_buffer, CMD_STR_LEN);

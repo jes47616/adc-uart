@@ -52,6 +52,7 @@ extern uint8_t uartTxCompleteFlag;
 #define STOP_____ "STOP_____"
 #define TRGMODE__ "TRGMODE__"
 #define INTMODE__ "INTMODE__"
+#define RESET____ "RESET____"
 
 // GPIO Burst Settings
 #define BURST_BUFFER_SIZE 5
