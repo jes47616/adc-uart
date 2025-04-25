@@ -93,16 +93,16 @@ class LivePlotter(QWidget):
         self.log_output.setMinimumHeight(100)
 
         # --- Final Layout ---
-        self.gpio_results_list = QListWidget()
-        self.gpio_results_list.setMinimumHeight(150)
+        self.zero_crossing_results_list = QListWidget()
+        self.zero_crossing_results_list.setMinimumHeight(150)
 
-        self.adc_results_list = QListWidget()
-        self.adc_results_list.setMinimumHeight(150)
+        self.phase_angle_results_list = QListWidget()
+        self.phase_angle_results_list.setMinimumHeight(150)
 
         self.log_output_results_layout = QHBoxLayout()
         self.log_output_results_layout.addWidget(self.log_output)
-        self.log_output_results_layout.addWidget(self.gpio_results_list)
-        self.log_output_results_layout.addWidget(self.adc_results_list)
+        self.log_output_results_layout.addWidget(self.zero_crossing_results_list)
+        self.log_output_results_layout.addWidget(self.phase_angle_results_list)
 
         layout = QVBoxLayout()
         layout.addLayout(btn_layout)
@@ -153,7 +153,8 @@ class LivePlotter(QWidget):
             self.send_command(RESET_CMD)
             self.reset_log_output()
             self.clear_plot()
-            self.gpio_results_list.clear()
+            self.zero_crossing_results_list.clear()
+            self.phase_angle_results_list.clear()
         else:
             print("[INFO] Plotting is not running.")
             self.reset_log_output()
@@ -373,6 +374,36 @@ class LivePlotter(QWidget):
 
         return arc_start, arc_end
 
+    def berechne_phasenwinkel(self, strom_zero, spannung_zero, periode_ms=20.0):
+        delta_t = spannung_zero - strom_zero  # in ms
+        phi = (delta_t / periode_ms) * 360.0  # in degrees
+        return phi
+
+    def berechne_mehrere_phasenwinkel(self, strom_zeros, spannung_zeros, periode_ms=20.0):
+        phasenwinkel = []
+        # Pair each voltage zero with the NEXT adc zero (skip first adc zero)
+        n = min(len(spannung_zeros), len(strom_zeros) - 1)
+        for i in range(n):
+            sz = strom_zeros[i+1]  # skip first adc zero
+            vz = spannung_zeros[i]
+            phi = self.berechne_phasenwinkel(sz, vz, periode_ms)
+            phasenwinkel.append((sz, vz, phi))
+        return phasenwinkel
+
+    def berechne_adc_frequenz(self, adc_zeros):
+        if len(adc_zeros) < 3:
+            return None
+        periods = [adc_zeros[i+2] - adc_zeros[i] for i in range(len(adc_zeros)-2)]
+        mean_period = sum(periods) / len(periods)
+        frequency = 1000.0 / mean_period  # ms to Hz
+        return frequency
+
+    def berechne_adc_amplitude(self, adc_signal_data):
+        if not adc_signal_data:
+            return None
+        amplitude = (max(adc_signal_data) - min(adc_signal_data)) / 2.0
+        return amplitude
+
     def process_analysis(self):
         arc_start, arc_end = self.detect_arc_duration(
             self.gpio_time_data, self.gpio_signal_data
@@ -390,54 +421,74 @@ class LivePlotter(QWidget):
             else None
         )
 
-        # Print to console and log output
-        self.log_output.append("\n--- Analysis Results ---")
-        self.log_output.append(f"ADC: Current Zero-Crossings: {len(adc_zeros)}")
+        # --- Frequency and amplitude calculation ---
+        adc_freq = self.berechne_adc_frequenz(adc_zeros)
+        adc_amp = self.berechne_adc_amplitude(self.adc_signal_data)
+
+        # --- Zero-Crossing & Arc Analysis Widget (Middle) ---
+        self.zero_crossing_results_list.clear()
+        self.zero_crossing_results_list.addItem("🟦 System Overview & Events")
+        self.zero_crossing_results_list.addItem("")
+        # Section 1: System Info
+        self.zero_crossing_results_list.addItem("🖥️ AD-Converter")
+        self.zero_crossing_results_list.addItem("  🕒 Sampling Rate: 10 kHz")  # Adjust as needed
+        self.zero_crossing_results_list.addItem("  📏 Resolution: 12-bit, ±1.65V")
+        self.zero_crossing_results_list.addItem("")
+        # Section 2: Signal Metrics
+        self.zero_crossing_results_list.addItem("⚡ Current Signal (ADC)")
+        self.zero_crossing_results_list.addItem(f"  🔉 Amplitude: {adc_amp:.2f} V, Rogowski-Coil [100mV/kA]" if adc_amp else "  🔉 Amplitude: n/a")
+        self.zero_crossing_results_list.addItem(f"  🧭 Frequency: {adc_freq:.2f} Hz" if adc_freq else "  🧭 Frequency: n/a")
+        self.zero_crossing_results_list.addItem("")
+        # Section 3: Zero-Crossings
+        self.zero_crossing_results_list.addItem("🔄 Current Zero-Crossings")
         for t in adc_zeros:
-            self.log_output.append(f"  ADC/Current Zero @ {t:.3f} ms")
-        self.log_output.append(f"\nLED Pulse Midpoints: {len(gpio_midpoints)}")
+            self.zero_crossing_results_list.addItem(f"  • {t:.3f} ms")
+        self.zero_crossing_results_list.addItem("")
+        self.zero_crossing_results_list.addItem("🔆 Voltage Zero-Crossings (LED Midpoints)")
         for t in gpio_midpoints:
-            self.log_output.append(f"  Voltage Zero @ {t:.3f} ms")
-        if duration:
-            self.log_output.append(f"\nArc Duration: {duration:.3f} ms")
+            self.zero_crossing_results_list.addItem(f"  • {t:.3f} ms")
+        self.zero_crossing_results_list.addItem("")
+        # Section 4: Arc Event
+        self.zero_crossing_results_list.addItem("🔥 Arc Event")
+        self.zero_crossing_results_list.addItem(f"  🟢 Start: {arc_start:.3f} ms" if arc_start else "  🟢 Start: n/a")
+        arc_end_corrected = arc_end - gpio_first_half_duration if arc_end and gpio_first_half_duration else None
+        self.zero_crossing_results_list.addItem(f"  🔴 End: {arc_end_corrected:.3f} ms" if arc_end_corrected else "  🔴 End: n/a")
+        self.zero_crossing_results_list.addItem(f"  ⏱️ Duration: {duration:.3f} ms" if duration else "  ⏱️ Duration: n/a")
+
+        # --- Phase Angle Calculation Widget (Right) ---
+        # Only consider pulse pairs after arc duration
+        gpio_midpoints_after_arc = [t for t in gpio_midpoints if t > arc_end]
+        phasenwinkel_liste = self.berechne_mehrere_phasenwinkel(adc_zeros, gpio_midpoints_after_arc, 20.0)
+        self.phase_angle_results_list.clear()
+        self.phase_angle_results_list.addItem("🟩 Phase Analysis & Insights")
+        self.phase_angle_results_list.addItem("")
+        # Section 1: Phase Angle Calculation
+        self.phase_angle_results_list.addItem("🧮 Phase Angle Calculation")
+        for sz, vz, phi in phasenwinkel_liste:
+            self.phase_angle_results_list.addItem(
+                f"  • Current @ {sz:.3f} ms \u2194 Voltage @ {vz:.3f} ms \u21D2 \u03A6 = {phi:+.1f}\u00B0"
+            )
+        self.phase_angle_results_list.addItem("")
+        # Section 2: Summary/Insights
+        if phasenwinkel_liste:
+            angles = [phi for _, _, phi in phasenwinkel_liste]
+            mean_phi = sum(angles) / len(angles)
+            min_phi = min(angles)
+            max_phi = max(angles)
+            self.phase_angle_results_list.addItem(f"📊 Mean Phase Angle: {mean_phi:+.1f}\u00B0")
+            self.phase_angle_results_list.addItem(f"📉 Min: {min_phi:+.1f}\u00B0, 📈 Max: {max_phi:+.1f}\u00B0")
+            self.phase_angle_results_list.addItem(f"🏷️ Pairs Analyzed: {len(angles)}")
         else:
-            self.log_output.append("Arc Duration: not detected")
-        self.gpio_results_list.clear()
-
-        self.adc_results_list.clear()
-        self.gpio_results_list.addItem("⚡ Re-ignition Voltage Zero-Crossings (LED Midpoints):")
-        for t in gpio_midpoints:
-            self.gpio_results_list.addItem(f"  • Voltage Zero @ {t:.3f} ms")
-
-        self.adc_results_list.addItem("🔍 ADC/Current Zero-Crossings:")
-        for t in adc_zeros:
-            self.adc_results_list.addItem(f"  • ADC/Current Zero @ {t:.3f} ms")
-
-        if duration:
-            self.gpio_results_list.addItem(f"🔥 Arc Duration: {duration:.3f} ms")
-        else:
-            self.gpio_results_list.addItem("🔥 Arc Duration: not detected")
+            self.phase_angle_results_list.addItem("No phase angles calculated.")
+        self.phase_angle_results_list.addItem("")
+        # Section 3: Legend
+        self.phase_angle_results_list.addItem("ℹ️ Legend:")
+        self.phase_angle_results_list.addItem("  ⚡: Current, 🔆: Voltage, 🔄: Zero-Crossing, 🔥: Arc, 🧮: Phase, ⏱️: Duration")
 
     def closeEvent(self, event):
         # Stop the serial reader first
         if self.serial_reader:
             self.serial_reader.stop()
-
-        # # Save GPIO data arrays if available
-        # try:
-        #     if self.gpio_time_data and self.gpio_signal_data:
-        #         # Create a timestamp for the filename
-        #         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        #         filename = f"adc_data_{timestamp}.csv"
-
-        #         # Save data as CSV file with time,value pairs
-        #         with open(filename, "w") as f:
-        #             f.write("Time_ms,Signal_Level\n")  # Header
-        #             for t, v in zip(self.adc_time_data, self.adc_signal_data):
-        #                 f.write(f"{t:.6f},{v:.6f}\n")
-        #         print(f"[INFO] ADC data saved to {filename}")
-        # except Exception as e:
-        #     print(f"[ERROR] Failed to save ADC data: {str(e)}")
 
         event.accept()
 
