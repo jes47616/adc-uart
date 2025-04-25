@@ -30,7 +30,7 @@ RESET_CMD = "RESET____"
 class LivePlotter(QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Live ADC/GPIO Plot")
+        self.setWindowTitle("Real-Time ADC/GPIO Plot")
         self.resize(1000, 600)
 
         # Time reference
@@ -392,9 +392,9 @@ class LivePlotter(QWidget):
 
         # Print to console and log output
         self.log_output.append("\n--- Analysis Results ---")
-        self.log_output.append(f"ADC Zero-Crossings: {len(adc_zeros)}")
+        self.log_output.append(f"ADC: Current Zero-Crossings: {len(adc_zeros)}")
         for t in adc_zeros:
-            self.log_output.append(f"  ADC Zero @ {t:.3f} ms")
+            self.log_output.append(f"  ADC/Current Zero @ {t:.3f} ms")
         self.log_output.append(f"\nLED Pulse Midpoints: {len(gpio_midpoints)}")
         for t in gpio_midpoints:
             self.log_output.append(f"  Voltage Zero @ {t:.3f} ms")
@@ -405,13 +405,13 @@ class LivePlotter(QWidget):
         self.gpio_results_list.clear()
 
         self.adc_results_list.clear()
-        self.gpio_results_list.addItem("⚡ Voltage Zero-Crossings (LED Midpoints):")
+        self.gpio_results_list.addItem("⚡ Re-ignition Voltage Zero-Crossings (LED Midpoints):")
         for t in gpio_midpoints:
             self.gpio_results_list.addItem(f"  • Voltage Zero @ {t:.3f} ms")
 
-        self.adc_results_list.addItem("🔍 ADC Zero-Crossings:")
+        self.adc_results_list.addItem("🔍 ADC/Current Zero-Crossings:")
         for t in adc_zeros:
-            self.adc_results_list.addItem(f"  • ADC Zero @ {t:.3f} ms")
+            self.adc_results_list.addItem(f"  • ADC/Current Zero @ {t:.3f} ms")
 
         if duration:
             self.gpio_results_list.addItem(f"🔥 Arc Duration: {duration:.3f} ms")
