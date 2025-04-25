@@ -81,6 +81,127 @@ The Python application provides:
    - Automated filtering of initial burst signals for accurate calculations
    - Recovery voltage analysis specific to OLTC with vacuum interrupters
 
+## MCU Core Structure
+
+The STM32G474 firmware is organized into a standard STM32CubeIDE project structure, with the `Core` folder containing the main application code:
+
+### Core Folder Organization
+- **Inc/**: Header files
+- **Src/**: Source files
+- **Startup/**: Processor startup code
+
+### Key Files and Components
+
+#### Configuration and Utilities
+- **config.h/config.c**:
+  - System-wide configuration parameters
+  - Adjustable settings for ADC sampling rates, buffer sizes, and UART configurations
+  - Debug mode flags and feature toggles
+  - Pin definitions and hardware-specific constants
+
+- **common.h/common.c**:
+  - Common utility functions used throughout the application
+  - Helper macros and inline functions
+  - Data type definitions and conversions
+  - Buffer management utilities
+
+- **ringbuffer.h/ringbuffer.c**:
+  - Implementation of circular buffer data structure
+  - Thread-safe read/write operations for data exchange between ISRs and main context
+  - Buffer overflow protection and status reporting
+  - Optimized for ADC samples and timestamp storage
+
+#### Peripheral Drivers
+
+- **madc.h/madc.c** (ADC Manager):
+  - ADC peripheral initialization and configuration
+  - DMA channel setup for ADC data transfer
+  - Sampling mode control (continuous vs. event-triggered)
+  - ADC calibration and error handling
+  - Data preprocessing and filtering options
+
+- **muart.h/muart.c** (UART Manager):
+  - UART peripheral configuration (115200 baud, 8-bit, EVEN parity)
+  - TX/RX buffer management
+  - DMA-based transmission for efficient data transfer
+  - Packet framing and protocol implementation
+  - Error detection and recovery mechanisms
+
+- **timer.h/timer.c**:
+  - Timer initialization for precise timestamping
+  - Microsecond resolution timing functions
+  - Timestamp synchronization between GPIO events and ADC data
+  - Timebase management for system scheduling
+
+#### Interrupt Handling
+
+- **handlers.h/handlers.c**:
+  - Custom interrupt handlers for GPIO, DMA, and timer events
+  - Event prioritization and processing logic
+  - Data synchronization between interrupt context and main application
+  - Error handling and recovery procedures for interrupt-related failures
+  - Timestamp correlation between ADC samples and GPIO events
+
+- **stm32g4xx_it.h/stm32g4xx_it.c**:
+  - STM32 HAL interrupt handlers and exception vectors
+  - System exception handlers (HardFault, MemManage, etc.)
+  - Peripheral interrupt routing to custom handlers
+
+- **callbacks.c**:
+  - HAL callback implementations for peripherals
+  - DMA transfer complete and half-complete handlers
+  - Timer overflow and update callbacks
+  - Error handling callbacks for graceful error recovery
+
+#### System and Main Application
+
+- **main.c/main.h**:
+  - Application entry point and main loop
+  - System initialization sequence
+  - Mode selection handling (continuous vs. interrupt mode)
+  - Command processing from UART
+  - Overall system state management
+
+- **stm32g4xx_hal_msp.c**:
+  - MCU-specific peripheral initialization
+  - Clock configuration for optimal performance
+  - GPIO, DMA, and interrupt priority configuration
+  - HAL MSP (MCU Support Package) initialization callbacks
+
+- **system_stm32g4xx.c**:
+  - System clock configuration
+  - Core frequency settings (170MHz operation)
+  - Flash latency and power settings
+
+### Firmware Operation Flow
+
+1. **Initialization Phase**:
+   - System clocks are configured for 170MHz operation
+   - Peripherals (GPIO, ADC, UART, Timers) are initialized
+   - DMA channels are configured for ADC and UART
+   - Ring buffers are initialized for data storage
+
+2. **Command Processing**:
+   - The system waits for commands from the UART interface
+   - Commands trigger mode changes, reset operations, or status reporting
+
+3. **Data Acquisition**:
+   - In Continuous Mode: ADC samples at 10kHz based on timer triggering
+   - In Interrupt Mode: ADC sampling starts on PA1 rising edge
+   - DMA transfers ADC data to memory without CPU intervention
+   - GPIO events are timestamped and stored in a separate buffer
+
+4. **Data Transmission**:
+   - ADC samples are packed into frames (200 samples per frame)
+   - GPIO events are transmitted with timestamps
+   - UART transmits data using DMA for efficiency
+   - Error detection ensures data integrity
+
+5. **Error Handling**:
+   - DMA errors are detected and recovery procedures initiated
+   - Buffer overflow conditions are monitored and reported
+   - System can reset peripherals if persistent errors occur
+
 ## Operation Modes
 
 ### Continuous Mode (Timer-Triggered)
