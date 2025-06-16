@@ -55,7 +55,7 @@ class LivePlotter(QWidget):
         self.plot_widget.showGrid(x=True, y=True)
         self.plot_widget.setLabel("left", "Voltage", "V")
         self.plot_widget.setLabel("bottom", "Time", "ms")
-        self.plot_widget.setYRange(0, 3.3)
+        self.plot_widget.setYRange(-2.0, 2.0)  # Adjusted for centered signal
 
         # Create curves for both signals
         self.adc_curve = self.plot_widget.plot([], [], pen=pg.mkPen("b", width=2))
@@ -242,7 +242,7 @@ class LivePlotter(QWidget):
             if ts_ms == 0:
                 continue
 
-            level = 0 if not data[i + 4] else 3.3  # already 0 or 1
+            level = 0 if not data[i + 4] else 0.5  # already 0 or 1
 
             # draw a vertical edge only if level changed
             if levels[-1] != level:

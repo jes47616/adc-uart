@@ -15,11 +15,14 @@ class FrameProcessor:
         """
         Convert raw ADC frame bytes to a list of voltage values.
         Assumes little-endian 16-bit samples.
+        Centers the signal around 0V instead of 1.65V.
         """
         voltages = []
         for i in range(0, len(packet_bytes), 2):
             raw = int.from_bytes(packet_bytes[i : i + 2], byteorder="little")
             voltage = (raw / (2**self.adc_resolution - 1)) * self.vref
+            # Center around 0V by subtracting 1.65V
+            voltage = voltage - 1.65
             voltages.append(voltage)
         return np.array(voltages)
 
