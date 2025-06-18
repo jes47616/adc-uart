@@ -433,6 +433,39 @@ class LivePlotter(QWidget):
                 
         return zero_crossings
 
+    def detect_current_zero_crossings(self, adc_times, adc_values, end_time=None):
+        """
+        Detect zero-crossings in the ADC current signal.
+        If end_time is provided, only include zero-crossings up to this time.
+        
+        Args:
+            adc_times: List of ADC timestamps
+            adc_values: List of ADC voltage values
+            end_time: Optional, only include zero-crossings up to this time
+            
+        Returns:
+            List of zero-crossing timestamps in ms
+        """
+        if not adc_times or len(adc_times) < 2:
+            return []
+            
+        zero_crossings = []
+        
+        # Find zero-crossings (where signal crosses 0V)
+        for i in range(1, len(adc_values)):
+            # Check if the signal crossed zero between these two points
+            if (adc_values[i-1] < 0 and adc_values[i] >= 0) or (adc_values[i-1] >= 0 and adc_values[i] < 0):
+                # Linear interpolation to find the exact zero-crossing time
+                if adc_values[i] != adc_values[i-1]:  # Avoid division by zero
+                    t_ratio = -adc_values[i-1] / (adc_values[i] - adc_values[i-1])
+                    t_zero = adc_times[i-1] + t_ratio * (adc_times[i] - adc_times[i-1])
+                    
+                    # Only include if before end_time (if specified)
+                    if end_time is None or t_zero <= end_time:
+                        zero_crossings.append(t_zero)
+        
+        return zero_crossings
+
     def process_arc_analysis(self):
         """
         Process all arc analysis when GPIO events are detected.
@@ -452,32 +485,50 @@ class LivePlotter(QWidget):
         t_start = self.detect_arc_start_time(self.gpio_time_data, gpio_levels)
         
         # Get arc end time
-        raw_end_time, last_pair_duration = self.detect_arc_end_time(self.gpio_time_data, gpio_levels)
+        raw_end_time, pulse_pair_duration = self.detect_arc_end_time(self.gpio_time_data, gpio_levels)
         
-        # Find zero-crossings after the raw end time
-        zero_crossings = self.find_zero_crossings(self.gpio_time_data, gpio_levels, raw_end_time)
+        # Find voltage zero-crossings (GPIO) after the raw end time
+        voltage_zero_crossings = self.find_zero_crossings(self.gpio_time_data, gpio_levels, raw_end_time)
         
         # Calculate the corrected end time
         t_end = None
         if raw_end_time is not None:
-            if last_pair_duration is not None:
-                t_end = raw_end_time - (last_pair_duration / 2.0)
+            if pulse_pair_duration is not None:
+                t_end = raw_end_time - (pulse_pair_duration / 2.0)
             else:
                 t_end = raw_end_time
         
         # Calculate arc duration
         t_arc = None
         if t_start is not None and raw_end_time is not None:
-            # Original formula: raw_end_time - t_start - (last_pair_duration / 2.0)
-            if last_pair_duration is not None:
-                t_arc = raw_end_time - t_start - (last_pair_duration / 2.0)
+            # Original formula: raw_end_time - t_start - (pulse_pair_duration / 2.0)
+            if pulse_pair_duration is not None:
+                t_arc = raw_end_time - t_start - (pulse_pair_duration / 2.0)
             else:
                 t_arc = raw_end_time - t_start
+        
+        # Find current zero-crossings from ADC data
+        current_zero_crossings = []
+        if self.adc_time_data and self.adc_signal_data:
+            # Find the last GPIO pulse pair time if available
+            last_pulse_time = None
+            if voltage_zero_crossings:
+                last_pulse_time = voltage_zero_crossings[-1]
+            
+            # Detect current zero-crossings up to the last pulse time
+            current_zero_crossings = self.detect_current_zero_crossings(
+                self.adc_time_data, 
+                self.adc_signal_data,
+                last_pulse_time
+            )
             
         # Update the middle widget with the results
-        self.update_arc_analysis_display(t_start, raw_end_time, t_end, t_arc, last_pair_duration, zero_crossings)
+        self.update_arc_analysis_display(
+            t_start, raw_end_time, t_end, t_arc, 
+            pulse_pair_duration, voltage_zero_crossings, current_zero_crossings
+        )
 
-    def update_arc_analysis_display(self, t_start, raw_end_time, t_end, t_arc, last_pair_duration, zero_crossings):
+    def update_arc_analysis_display(self, t_start, raw_end_time, t_end, t_arc, pulse_pair_duration, voltage_zero_crossings, current_zero_crossings=None):
         """
         Update the middle widget with arc analysis results.
         """
@@ -488,7 +539,23 @@ class LivePlotter(QWidget):
         current_time = datetime.datetime.now().strftime("%H:%M:%S")
         self.system_info_widget.append(f"<h3>⚡ Arc Analysis Results ({current_time})</h3>")
         
-        # Add arc timing information
+        # Add system information section
+        self.system_info_widget.append("<h4>System Information</h4>")
+        if hasattr(self, 'frame_processor'):
+            self.system_info_widget.append(f"<b>ADC Resolution:</b> {self.frame_processor.adc_resolution} bits")
+            self.system_info_widget.append(f"<b>Reference Voltage:</b> {self.frame_processor.vref:.2f} V")
+            self.system_info_widget.append(f"<b>Sampling Rate:</b> {self.frame_processor.sampling_rate_hz} Hz")
+            self.system_info_widget.append(f"<b>Sample Period:</b> {self.frame_processor.sample_period*1000:.3f} ms")
+        
+        # Calculate and display signal information
+        if self.adc_signal_data:
+            signal_min = min(self.adc_signal_data)
+            signal_max = max(self.adc_signal_data)
+            signal_amplitude = signal_max - signal_min
+            self.system_info_widget.append(f"<b>Current Signal Amplitude:</b> {signal_amplitude:.3f} V")
+        
+        # Add arc timing information section
+        self.system_info_widget.append("<h4>Arc Timing Analysis</h4>")
         if t_start is not None:
             self.system_info_widget.append(f"<b>Arc Start Time:</b> {t_start:.3f} ms")
         else:
@@ -499,8 +566,8 @@ class LivePlotter(QWidget):
         else:
             self.system_info_widget.append("<b>Raw End Time:</b> Not detected")
             
-        if last_pair_duration is not None:
-            self.system_info_widget.append(f"<b>Last Pulse Pair Duration:</b> {last_pair_duration:.3f} ms")
+        if pulse_pair_duration is not None:
+            self.system_info_widget.append(f"<b>Pulse Pair Duration:</b> {pulse_pair_duration:.3f} ms")
             
         if t_end is not None:
             self.system_info_widget.append(f"<b>Corrected End Time:</b> {t_end:.3f} ms")
@@ -511,15 +578,27 @@ class LivePlotter(QWidget):
             self.system_info_widget.append(f"<b>Arc Duration:</b> {t_arc:.3f} ms")
         else:
             self.system_info_widget.append("<b>Arc Duration:</b> Not detected")
-            
-        # Add zero-crossing information
-        self.system_info_widget.append(f"<b>Number of Zero-Crossings:</b> {len(zero_crossings)}")
-        if zero_crossings:
-            self.system_info_widget.append("<b>Zero-Crossing Timestamps (ms):</b>")
-            for i, zc in enumerate(zero_crossings[:10]):  # Show first 10 only to avoid cluttering
+        
+        # Add voltage zero-crossing information
+        self.system_info_widget.append("<h4>Voltage Zero-Crossings</h4>")
+        self.system_info_widget.append(f"<b>Number of Voltage Zero-Crossings:</b> {len(voltage_zero_crossings)}")
+        if voltage_zero_crossings:
+            self.system_info_widget.append("<b>Voltage Zero-Crossing Timestamps (ms):</b>")
+            for i, zc in enumerate(voltage_zero_crossings[:10]):  # Show first 10 only to avoid cluttering
                 self.system_info_widget.append(f"  {i+1}. {zc:.3f}")
-            if len(zero_crossings) > 10:
-                self.system_info_widget.append(f"  ... and {len(zero_crossings) - 10} more")
+            if len(voltage_zero_crossings) > 10:
+                self.system_info_widget.append(f"  ... and {len(voltage_zero_crossings) - 10} more")
+        
+        # Add current zero-crossing information
+        if current_zero_crossings is not None:
+            self.system_info_widget.append("<h4>Current Zero-Crossings</h4>")
+            self.system_info_widget.append(f"<b>Number of Current Zero-Crossings:</b> {len(current_zero_crossings)}")
+            if current_zero_crossings:
+                self.system_info_widget.append("<b>Current Zero-Crossing Timestamps (ms):</b>")
+                for i, zc in enumerate(current_zero_crossings[:10]):  # Show first 10 only
+                    self.system_info_widget.append(f"  {i+1}. {zc:.3f}")
+                if len(current_zero_crossings) > 10:
+                    self.system_info_widget.append(f"  ... and {len(current_zero_crossings) - 10} more")
 
     def handle_gpio_data(self, data):
         # Initialize with safe defaults if no previous data exists
