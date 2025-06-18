@@ -85,15 +85,33 @@ class LivePlotter(QWidget):
         btn_layout.addWidget(self.intmode_btn)
         btn_layout.addWidget(self.reset_btn)
 
+        # --- Bottom Widgets ---
+        # Left widget for hex data
         self.log_output = QTextEdit()
         self.log_output.setReadOnly(True)
         self.log_output.setMinimumHeight(100)
+        
+        # Middle widget for system information
+        self.system_info_widget = QTextEdit()
+        self.system_info_widget.setReadOnly(True)
+        self.system_info_widget.setMinimumHeight(100)
+        
+        # Right widget for phase angle analysis
+        self.phase_angle_widget = QTextEdit()
+        self.phase_angle_widget.setReadOnly(True)
+        self.phase_angle_widget.setMinimumHeight(100)
+        
+        # Create bottom layout to hold the three widgets
+        bottom_layout = QHBoxLayout()
+        bottom_layout.addWidget(self.log_output)
+        bottom_layout.addWidget(self.system_info_widget)
+        bottom_layout.addWidget(self.phase_angle_widget)
 
         # --- Final Layout ---
         layout = QVBoxLayout()
         layout.addLayout(btn_layout)
         layout.addWidget(self.plot_widget)
-        layout.addWidget(self.log_output)
+        layout.addLayout(bottom_layout)  # Add the bottom layout instead of just log_output
 
         self.setLayout(layout)
         self.set_controls_enabled(True)
@@ -253,6 +271,7 @@ class LivePlotter(QWidget):
 
         return timestamps[1:], levels[1:]
 
+
     def closeEvent(self, event):
         # Stop the serial reader first
         if self.serial_reader:
@@ -280,10 +299,5 @@ class LivePlotter(QWidget):
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     win = LivePlotter()
-    win.show()
-    win.show()
-    sys.exit(app.exec_())
-
-    win.show()
     win.show()
     sys.exit(app.exec_())
