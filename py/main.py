@@ -433,15 +433,16 @@ class LivePlotter(QWidget):
                 
         return zero_crossings
 
-    def detect_current_zero_crossings(self, adc_times, adc_values, end_time=None):
+    def detect_current_zero_crossings(self, adc_times, adc_values, end_time=None, start_time=None):
         """
         Detect zero-crossings in the ADC current signal.
-        If end_time is provided, only include zero-crossings up to this time.
+        If start_time and end_time are provided, only include zero-crossings within this time range.
         
         Args:
             adc_times: List of ADC timestamps
-            adc_values: List of ADC voltage values
+            adc_values: List of ADC voltage values (already centered around 0V)
             end_time: Optional, only include zero-crossings up to this time
+            start_time: Optional, only include zero-crossings after this time
             
         Returns:
             List of zero-crossing timestamps in ms
@@ -451,8 +452,22 @@ class LivePlotter(QWidget):
             
         zero_crossings = []
         
+        # Debug information
+        print(f"[DEBUG] ADC data length: {len(adc_times)}")
+        if len(adc_values) > 0:
+            print(f"[DEBUG] ADC value range: {min(adc_values):.3f}V to {max(adc_values):.3f}V")
+        
+        if start_time is not None:
+            print(f"[DEBUG] Looking for zero-crossings between {start_time:.3f}ms and {end_time:.3f}ms")
+        
         # Find zero-crossings (where signal crosses 0V)
         for i in range(1, len(adc_values)):
+            # Skip if time is outside our range of interest
+            if start_time is not None and adc_times[i] < start_time:
+                continue
+            if end_time is not None and adc_times[i] > end_time:
+                continue
+                
             # Check if the signal crossed zero between these two points
             if (adc_values[i-1] < 0 and adc_values[i] >= 0) or (adc_values[i-1] >= 0 and adc_values[i] < 0):
                 # Linear interpolation to find the exact zero-crossing time
@@ -460,10 +475,11 @@ class LivePlotter(QWidget):
                     t_ratio = -adc_values[i-1] / (adc_values[i] - adc_values[i-1])
                     t_zero = adc_times[i-1] + t_ratio * (adc_times[i] - adc_times[i-1])
                     
-                    # Only include if before end_time (if specified)
-                    if end_time is None or t_zero <= end_time:
+                    # Only include if within our time range
+                    if (start_time is None or t_zero >= start_time) and (end_time is None or t_zero <= end_time):
                         zero_crossings.append(t_zero)
-        
+                        
+        print(f"[DEBUG] Found {len(zero_crossings)} current zero-crossings")
         return zero_crossings
 
     def process_arc_analysis(self):
@@ -509,19 +525,25 @@ class LivePlotter(QWidget):
         
         # Find current zero-crossings from ADC data
         current_zero_crossings = []
-        if self.adc_time_data and self.adc_signal_data:
+        if self.adc_time_data and self.adc_signal_data and len(self.adc_time_data) == len(self.adc_signal_data):
             # Find the last GPIO pulse pair time if available
             last_pulse_time = None
             if voltage_zero_crossings:
                 last_pulse_time = voltage_zero_crossings[-1]
+            elif raw_end_time is not None:
+                # If no voltage zero-crossings, use raw end time
+                last_pulse_time = raw_end_time
             
-            # Detect current zero-crossings up to the last pulse time
-            current_zero_crossings = self.detect_current_zero_crossings(
-                self.adc_time_data, 
-                self.adc_signal_data,
-                last_pulse_time
-            )
-            
+            # Make sure we have ADC data that covers the time range we're interested in
+            if last_pulse_time is not None and len(self.adc_time_data) > 0 and self.adc_time_data[-1] >= last_pulse_time:
+                # Detect current zero-crossings during the arc event period
+                current_zero_crossings = self.detect_current_zero_crossings(
+                    self.adc_time_data, 
+                    self.adc_signal_data,
+                    last_pulse_time,
+                    t_start  # Only look at zero-crossings after arc start
+                )
+        
         # Update the middle widget with the results
         self.update_arc_analysis_display(
             t_start, raw_end_time, t_end, t_arc, 
@@ -584,8 +606,16 @@ class LivePlotter(QWidget):
         self.system_info_widget.append(f"<b>Number of Voltage Zero-Crossings:</b> {len(voltage_zero_crossings)}")
         if voltage_zero_crossings:
             self.system_info_widget.append("<b>Voltage Zero-Crossing Timestamps (ms):</b>")
-            for i, zc in enumerate(voltage_zero_crossings[:10]):  # Show first 10 only to avoid cluttering
-                self.system_info_widget.append(f"  {i+1}. {zc:.3f}")
+            # Include corrected end time as the first timestamp
+            if t_end is not None:
+                self.system_info_widget.append(f"  1. {t_end:.3f}")
+                # Continue with the actual zero-crossings, starting from index 2
+                for i, zc in enumerate(voltage_zero_crossings[:9]):  # Show up to 9 more to avoid cluttering
+                    self.system_info_widget.append(f"  {i+2}. {zc:.3f}")
+            else:
+                # If no corrected end time, just show the zero-crossings
+                for i, zc in enumerate(voltage_zero_crossings[:10]):  # Show first 10 only to avoid cluttering
+                    self.system_info_widget.append(f"  {i+1}. {zc:.3f}")
             if len(voltage_zero_crossings) > 10:
                 self.system_info_widget.append(f"  ... and {len(voltage_zero_crossings) - 10} more")
         
@@ -614,8 +644,8 @@ class LivePlotter(QWidget):
             # Get the binary level (0 or 1)
             is_high = bool(data[i + 4])
             
-            # For display: use 0 for LOW and 1.0 for HIGH (better visibility than 0.5)
-            display_level = 0 if not is_high else 1.0
+            # For display: use 0 for LOW and 0.5 for HIGH
+            display_level = 0 if not is_high else 0.5
             
             # For analysis: use binary 0/1
             binary_level = 0 if not is_high else 1
