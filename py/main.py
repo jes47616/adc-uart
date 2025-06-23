@@ -121,8 +121,11 @@ class LivePlotter(QWidget):
         self.plot_widget.setYRange(-2.0, 2.0)  # Adjusted for centered signal
 
         # Create curves for both signals
-        self.adc_curve = self.plot_widget.plot([], [], pen=pg.mkPen("b", width=2))
-        self.gpio_curve = self.plot_widget.plot([], [], pen=pg.mkPen("r", width=2))
+        self.adc_curve = self.plot_widget.plot([], [], pen=pg.mkPen("b", width=2), name="Rogowski Coil (dI/dt)")
+        self.gpio_curve = self.plot_widget.plot([], [], pen=pg.mkPen("r", width=2), name="LED Signal")
+        
+        # Add legend to the plot
+        self.plot_widget.addLegend(offset=(-30, 30))
         
         # --- Controls ---
         self.port_selector = QComboBox()
@@ -1125,6 +1128,8 @@ class LivePlotter(QWidget):
         """Toggle between raw ADC signal and integrated current signal."""
         if hasattr(self, 'showing_integrated') and self.showing_integrated:
             self.adc_curve.setData(self.adc_time_data, self.adc_signal_data)
+            self.adc_curve.setPen(pg.mkPen("b", width=2))  # Change back to blue for raw signal
+            self.adc_curve.opts['name'] = "Rogowski Coil (dI/dt)"  # Update name in legend
             self.showing_integrated = False
             self.signal_toggle_btn.setText("Show Current (Integrated)")
             # Update the zero-crossing detection and phase angle analysis with the raw data
@@ -1134,6 +1139,8 @@ class LivePlotter(QWidget):
                 # Recalculate integration with latest improvements
                 self.integrated_adc_data = self.integrate_adc_signal()
                 self.adc_curve.setData(self.adc_time_data, self.integrated_adc_data)
+                self.adc_curve.setPen(pg.mkPen("#FF8C00", width=2))  # Change to orange for integrated signal
+                self.adc_curve.opts['name'] = "Current (Integrated)"  # Update name in legend
                 self.showing_integrated = True
                 self.signal_toggle_btn.setText("Show dI/dt (Raw)")
                 # Update the zero-crossing detection and phase angle analysis with the integrated data
