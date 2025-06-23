@@ -953,18 +953,22 @@ class LivePlotter(QWidget):
             self.phase_angle_widget.setHtml(html_content)
             return
         
-        # Calculate the period of the signal (time between consecutive zero-crossings)
-        period_ms = None
+        # Calculate the period of the signal
+        half_period_ms = None
         if len(voltage_zero_crossings) >= 2:
-            period_ms = voltage_zero_crossings[1] - voltage_zero_crossings[0]
+            half_period_ms = voltage_zero_crossings[1] - voltage_zero_crossings[0]
         elif len(current_zero_crossings) >= 2:
-            period_ms = current_zero_crossings[1] - current_zero_crossings[0]
+            half_period_ms = current_zero_crossings[1] - current_zero_crossings[0]
         
-        # If we couldn't determine the period, assume 60Hz (16.67ms period)
-        if period_ms is None or period_ms <= 0:
-            period_ms = 1000 / 60  # 60Hz = 16.67ms period
+        # If we couldn't determine the half-period, assume 50Hz (20ms period, 10ms half-period)
+        if half_period_ms is None or half_period_ms <= 0:
+            half_period_ms = 1000 / (50 * 2)  # 50Hz = 20ms period, 10ms half-period
         
-        frequency = 1000 / period_ms if period_ms > 0 else 60
+        # Full period is twice the time between consecutive zero-crossings (one full AC cycle)
+        period_ms = half_period_ms * 2
+        
+        # Calculate frequency from the full period
+        frequency = 1000 / period_ms if period_ms > 0 else 50
             
         # For each voltage zero-crossing, find the closest current zero-crossing
         phase_angles = []
