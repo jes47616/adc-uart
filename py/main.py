@@ -936,6 +936,10 @@ class LivePlotter(QWidget):
             self.phase_angle_widget = QTextEdit()
             self.phase_angle_widget.setReadOnly(True)
             self.right_layout.addWidget(self.phase_angle_widget)
+            
+        # Add a title at the top of the widget
+        self.phase_angle_widget.clear()
+        self.phase_angle_widget.append('<h3 style="color: #4285f4; margin-top: 0;">⚡ Phase Angle Analysis ⚡</h3>')
         
         # Check if we have both voltage and current zero-crossings
         if not voltage_zero_crossings or not current_zero_crossings:
@@ -997,7 +1001,7 @@ class LivePlotter(QWidget):
                 
                 # Display the pair and calculation
                 self.phase_angle_widget.append(
-                    f"• Current @ <b>{closest_c_zc:.3f}</b> ms — Voltage @ <b>{v_zc:.3f}</b> ms ⇒ Φ = <b>{phase_angle:.1f}°</b> {direction}")
+                    f"• Current @ <b>{closest_c_zc:.3f}</b> ms — Voltage @ <b>{v_zc:.3f}</b> ms ⇒ Φ = <b>{phase_angle:.1f}°</b>")
                 pairs_analyzed += 1
         
         # Calculate statistics if we have phase angles
