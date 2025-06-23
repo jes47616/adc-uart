@@ -38,7 +38,7 @@ class SerialReader(QObject):
 
     def log_packet(self, packet: bytes):
         hex_str = " ".join(f"{b:02X}" for b in packet)
-        print(f"[PACKET] {hex_str}")
+        #print(f"[PACKET] {hex_str}")
 
     def log_desync(self, byte: int):
         print(f"[DESYNC] Dropped byte: {byte:02X}")

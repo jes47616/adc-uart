@@ -144,6 +144,7 @@ class LivePlotter(QWidget):
         if self.is_running:
             self.is_running = False
             self.set_controls_enabled(True)  # Re-enable other controls
+            self.process_arc_analysis()
             print("[INFO] Plotting stopped.")
             self.send_command(STOP_CMD)
 
@@ -236,6 +237,7 @@ class LivePlotter(QWidget):
                     # Update the plot
                     # print("Adding ADC data to plot")
                     self.adc_curve.setData(self.adc_time_data, self.adc_signal_data)
+
                 else:
                     print("No ADC data found")
                     return
@@ -253,7 +255,7 @@ class LivePlotter(QWidget):
                 self.gpio_curve.setData(self.gpio_time_data, self.gpio_signal_data)
                 
                 # Process arc analysis when GPIO events are detected
-                self.process_arc_analysis()
+
                 
                 # Log packet
                 self.log_packet(packet)
@@ -288,7 +290,7 @@ class LivePlotter(QWidget):
             gpio_levels: List of GPIO signal levels (0 or 1)
             
         Returns:
-            Tuple of (raw_end_time, last_pair_duration) in ms, or (None, None) if not found
+            Tuple of (raw_end_time, pulse_pair_duration) in ms, or (None, None) if not found
         """
         if not gpio_times or len(gpio_times) < 2:
             return None, None
@@ -433,60 +435,72 @@ class LivePlotter(QWidget):
                 
         return zero_crossings
 
-    def detect_current_zero_crossings(self, adc_times, adc_values, end_time=None, start_time=None):
+    def detect_current_zero_crossings(self, adc_times, adc_values, start_time=None, end_time=None):
         """
         Detect zero-crossings in the ADC current signal.
-        If start_time and end_time are provided, only include zero-crossings within this time range.
         
         Args:
-            adc_times: List of ADC timestamps
-            adc_values: List of ADC voltage values (already centered around 0V)
-            end_time: Optional, only include zero-crossings up to this time
+            adc_times: List of ADC timestamps in ms
+            adc_values: List of ADC voltage values (centered around 0V)
             start_time: Optional, only include zero-crossings after this time
+            end_time: Optional, only include zero-crossings up to this time
             
         Returns:
             List of zero-crossing timestamps in ms
         """
-        if not adc_times or len(adc_times) < 2:
+        # Basic validation
+        if not adc_times or len(adc_times) < 2 or len(adc_times) != len(adc_values):
+            print("Invalid data for zero-crossing detection")
             return []
+        print("Zero-crossing detection started")
+        # Convert voltage values back to raw ADC counts (0-4095)
+        # The formula used in frame.py is: voltage = (raw / 4095) * 3.3 - 1.65
+        # So to reverse: raw = ((voltage + 1.65) / 3.3) * 4095
+        raw_adc_values = []
+        for v in adc_values:
+            raw = ((v + 1.65) / 3.3) * 4095
+            raw_adc_values.append(raw)
             
+        # The midpoint for raw ADC counts is 2048 (for 12-bit ADC)
+        midpoint = 2048
+        
+        # Apply time window if specified
+        if start_time is None and end_time is None:
+            # If no time window is specified, use the GPIO trigger time as start
+            # and 60ms after that as end (as per requirements)
+            if hasattr(self, 'gpio_time_data') and self.gpio_time_data:
+                start_time = self.gpio_time_data[0]  # First GPIO timestamp
+                end_time = start_time + 60.0  # 60ms after trigger
+        
+        # Find zero-crossings (where the signal crosses the midpoint)
         zero_crossings = []
-        
-        # Debug information
-        print(f"[DEBUG] ADC data length: {len(adc_times)}")
-        if len(adc_values) > 0:
-            print(f"[DEBUG] ADC value range: {min(adc_values):.3f}V to {max(adc_values):.3f}V")
-        
-        if start_time is not None:
-            print(f"[DEBUG] Looking for zero-crossings between {start_time:.3f}ms and {end_time:.3f}ms")
-        
-        # Find zero-crossings (where signal crosses 0V)
-        for i in range(1, len(adc_values)):
-            # Skip if time is outside our range of interest
+        for i in range(1, len(raw_adc_values)):
+            # Check if this point is within our time window
             if start_time is not None and adc_times[i] < start_time:
                 continue
             if end_time is not None and adc_times[i] > end_time:
-                continue
+                break
                 
-            # Check if the signal crossed zero between these two points
-            if (adc_values[i-1] < 0 and adc_values[i] >= 0) or (adc_values[i-1] >= 0 and adc_values[i] < 0):
-                # Linear interpolation to find the exact zero-crossing time
-                if adc_values[i] != adc_values[i-1]:  # Avoid division by zero
-                    t_ratio = -adc_values[i-1] / (adc_values[i] - adc_values[i-1])
-                    t_zero = adc_times[i-1] + t_ratio * (adc_times[i] - adc_times[i-1])
-                    
-                    # Only include if within our time range
-                    if (start_time is None or t_zero >= start_time) and (end_time is None or t_zero <= end_time):
-                        zero_crossings.append(t_zero)
-                        
-        print(f"[DEBUG] Found {len(zero_crossings)} current zero-crossings")
+            # Check for midpoint crossing (raw ADC value crossing 2048)
+            if ((raw_adc_values[i-1] < midpoint and raw_adc_values[i] >= midpoint) or 
+                (raw_adc_values[i-1] >= midpoint and raw_adc_values[i] < midpoint)):
+                
+                # Use linear interpolation to find the exact crossing time
+                if raw_adc_values[i] != raw_adc_values[i-1]:  # Avoid division by zero
+                    t_ratio = (midpoint - raw_adc_values[i-1]) / (raw_adc_values[i] - raw_adc_values[i-1])
+                    t_cross = adc_times[i-1] + t_ratio * (adc_times[i] - adc_times[i-1])
+                    zero_crossings.append(t_cross)
+        
         return zero_crossings
 
     def process_arc_analysis(self):
         """
-        Process all arc analysis when GPIO events are detected.
-        Updates the middle widget with the results.
+        Process arc analysis based on GPIO and ADC data.
+        
+        This method detects arc start/end times, calculates arc duration,
+        and finds zero-crossings in both voltage (GPIO) and current (ADC) signals.
         """
+        # Check if we have enough data
         if not self.gpio_time_data or not self.gpio_signal_data:
             return
             
@@ -517,7 +531,6 @@ class LivePlotter(QWidget):
         # Calculate arc duration
         t_arc = None
         if t_start is not None and raw_end_time is not None:
-            # Original formula: raw_end_time - t_start - (pulse_pair_duration / 2.0)
             if pulse_pair_duration is not None:
                 t_arc = raw_end_time - t_start - (pulse_pair_duration / 2.0)
             else:
@@ -525,35 +538,38 @@ class LivePlotter(QWidget):
         
         # Find current zero-crossings from ADC data
         current_zero_crossings = []
+        print("ADC data:")
+        print(self.adc_time_data)
+        print(self.adc_signal_data)
         if self.adc_time_data and self.adc_signal_data and len(self.adc_time_data) == len(self.adc_signal_data):
-            # Find the last GPIO pulse pair time if available
-            last_pulse_time = None
-            if voltage_zero_crossings:
-                last_pulse_time = voltage_zero_crossings[-1]
-            elif raw_end_time is not None:
-                # If no voltage zero-crossings, use raw end time
-                last_pulse_time = raw_end_time
+            # Use t_start as the start time and t_start + 60ms as the end time
+            start_time = t_start if t_start is not None else None
+            end_time = start_time + 60.0 if start_time is not None else None
             
-            # Make sure we have ADC data that covers the time range we're interested in
-            if last_pulse_time is not None and len(self.adc_time_data) > 0 and self.adc_time_data[-1] >= last_pulse_time:
-                # Detect current zero-crossings during the arc event period
-                current_zero_crossings = self.detect_current_zero_crossings(
-                    self.adc_time_data, 
-                    self.adc_signal_data,
-                    last_pulse_time,
-                    t_start  # Only look at zero-crossings after arc start
-                )
-        
-        # Update the middle widget with the results
+            # Detect zero-crossings in the specified time window
+            print("Current zero-crossing detection started")
+            current_zero_crossings = self.detect_current_zero_crossings(
+                self.adc_time_data, 
+                self.adc_signal_data,
+                start_time,
+                end_time
+            )
+            print("Current zero-crossing detection finished")                
+        # Update the display with our findings
         self.update_arc_analysis_display(
-            t_start, raw_end_time, t_end, t_arc, 
-            pulse_pair_duration, voltage_zero_crossings, current_zero_crossings
+            t_start, raw_end_time, pulse_pair_duration, t_end, t_arc,
+            voltage_zero_crossings, current_zero_crossings
         )
 
-    def update_arc_analysis_display(self, t_start, raw_end_time, t_end, t_arc, pulse_pair_duration, voltage_zero_crossings, current_zero_crossings=None):
+    def update_arc_analysis_display(self, t_start, raw_end_time, pulse_pair_duration, t_end, t_arc, voltage_zero_crossings, current_zero_crossings=None):
         """
         Update the middle widget with arc analysis results.
         """
+        # If no current zero-crossings were provided but we have ADC data, detect them directly
+        if current_zero_crossings is None or len(current_zero_crossings) == 0:
+            if self.adc_time_data and self.adc_signal_data and len(self.adc_time_data) == len(self.adc_signal_data):
+                # Detect all zero-crossings in the signal
+                current_zero_crossings = self.detect_current_zero_crossings(self.adc_time_data, self.adc_signal_data)
         # Clear previous content
         self.system_info_widget.clear()
         
@@ -620,15 +636,17 @@ class LivePlotter(QWidget):
                 self.system_info_widget.append(f"  ... and {len(voltage_zero_crossings) - 10} more")
         
         # Add current zero-crossing information
-        if current_zero_crossings is not None:
-            self.system_info_widget.append("<h4>Current Zero-Crossings</h4>")
-            self.system_info_widget.append(f"<b>Number of Current Zero-Crossings:</b> {len(current_zero_crossings)}")
-            if current_zero_crossings:
-                self.system_info_widget.append("<b>Current Zero-Crossing Timestamps (ms):</b>")
-                for i, zc in enumerate(current_zero_crossings[:10]):  # Show first 10 only
-                    self.system_info_widget.append(f"  {i+1}. {zc:.3f}")
-                if len(current_zero_crossings) > 10:
-                    self.system_info_widget.append(f"  ... and {len(current_zero_crossings) - 10} more")
+        self.system_info_widget.append("<h4>Current Zero-Crossings</h4>")
+        self.system_info_widget.append(f"<b>Number of Current Zero-Crossings:</b> {len(current_zero_crossings)}")
+        
+        if current_zero_crossings:
+            self.system_info_widget.append("<b>Current Zero-Crossing Timestamps (ms):</b>")
+            for i, zc in enumerate(current_zero_crossings[:10]):  # Show first 10 only
+                self.system_info_widget.append(f"  {i+1}. {zc:.3f}")
+            if len(current_zero_crossings) > 10:
+                self.system_info_widget.append(f"  ... and {len(current_zero_crossings) - 10} more")
+        
+        # This section is now handled above
 
     def handle_gpio_data(self, data):
         # Initialize with safe defaults if no previous data exists
