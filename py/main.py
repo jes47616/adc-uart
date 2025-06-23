@@ -1,4 +1,5 @@
 import sys
+import math
 import numpy as np
 from PyQt5.QtWidgets import (
     QApplication,
@@ -28,8 +29,42 @@ RESET_CMD = "RESET____"
 class LivePlotter(QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Live ADC/GPIO Plot")
-        self.resize(1000, 600)
+        self.setWindowTitle("Arc Analysis System")
+        self.resize(1200, 800)
+        
+        # Apply professional styling
+        self.setStyleSheet("""
+            QWidget {
+                font-family: 'Segoe UI', Arial, sans-serif;
+                color: #333333;
+            }
+            QTextEdit {
+                border: 1px solid #cccccc;
+                border-radius: 4px;
+                background-color: white;
+                padding: 5px;
+            }
+            QPushButton {
+                background-color: #4285f4;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 6px 12px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #3367d6;
+            }
+            QPushButton:pressed {
+                background-color: #2a56c6;
+            }
+            QComboBox {
+                border: 1px solid #cccccc;
+                border-radius: 4px;
+                padding: 4px;
+                background-color: white;
+            }
+        """)
 
         # Time reference
         self.start_time_us = None
@@ -49,7 +84,33 @@ class LivePlotter(QWidget):
 
         # Flag to track plotting state
         self.is_running = False
-
+        
+        # Create main layout
+        main_layout = QVBoxLayout(self)
+        
+        # Create controls layout
+        controls_layout = QHBoxLayout()
+        
+        # Create system overview widgets (4 separate widgets)
+        self.system_widget = QTextEdit()
+        self.system_widget.setReadOnly(True)
+        self.system_widget.setMaximumHeight(90)
+        
+        self.adc_widget = QTextEdit()
+        self.adc_widget.setReadOnly(True)
+        self.adc_widget.setMaximumHeight(90)
+        
+        self.signal_widget = QTextEdit()
+        self.signal_widget.setReadOnly(True)
+        self.signal_widget.setMaximumHeight(90)
+        
+        self.gpio_widget = QTextEdit()
+        self.gpio_widget.setReadOnly(True)
+        self.gpio_widget.setMaximumHeight(90)
+        
+        # Create overview layout
+        overview_layout = QHBoxLayout()
+        
         # --- Plot Widget ---
         self.plot_widget = pg.PlotWidget()
         self.plot_widget.setBackground("w")
@@ -61,16 +122,26 @@ class LivePlotter(QWidget):
         # Create curves for both signals
         self.adc_curve = self.plot_widget.plot([], [], pen=pg.mkPen("b", width=2))
         self.gpio_curve = self.plot_widget.plot([], [], pen=pg.mkPen("r", width=2))
+        
         # --- Controls ---
         self.port_selector = QComboBox()
         self.refresh_ports()
         self.port_selector.currentTextChanged.connect(self.connect_serial)
 
         self.start_btn = QPushButton("Start")
+        self.start_btn.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold;")
+        
         self.stop_btn = QPushButton("Stop")
+        self.stop_btn.setStyleSheet("background-color: #F44336; color: white; font-weight: bold;")
+        
         self.trgmode_btn = QPushButton("Continuous Mode")
+        self.trgmode_btn.setStyleSheet("background-color: #2196F3; color: white;")
+        
         self.intmode_btn = QPushButton("Interrupt Mode")
+        self.intmode_btn.setStyleSheet("background-color: #2196F3; color: white;")
+        
         self.reset_btn = QPushButton("Reset")
+        self.reset_btn.setStyleSheet("background-color: #F44336; color: white; font-weight: bold;")
 
         self.start_btn.clicked.connect(self.start_plotting)
         self.stop_btn.clicked.connect(self.stop_plotting)
@@ -78,44 +149,285 @@ class LivePlotter(QWidget):
         self.intmode_btn.clicked.connect(lambda: self.send_command(INTMODE_CMD))
         self.reset_btn.clicked.connect(lambda: self.send_command(RESET_CMD))
 
-        btn_layout = QHBoxLayout()
-        btn_layout.addWidget(self.port_selector)
-        btn_layout.addWidget(self.start_btn)
-        btn_layout.addWidget(self.stop_btn)
-        btn_layout.addWidget(self.trgmode_btn)
-        btn_layout.addWidget(self.intmode_btn)
-        btn_layout.addWidget(self.reset_btn)
-
-        # --- Bottom Widgets ---
+        controls_layout.addWidget(self.port_selector)
+        controls_layout.addWidget(self.start_btn)
+        controls_layout.addWidget(self.stop_btn)
+        controls_layout.addWidget(self.trgmode_btn)
+        controls_layout.addWidget(self.intmode_btn)
+        controls_layout.addWidget(self.reset_btn)
+        
+        # Add widgets to overview layout
+        overview_layout.addWidget(self.system_widget)
+        overview_layout.addWidget(self.adc_widget)
+        overview_layout.addWidget(self.signal_widget)
+        overview_layout.addWidget(self.gpio_widget)
+        
+        # Initialize the overview widgets
+        self.update_system_widget()
+        self.update_adc_widget()
+        self.update_signal_widget()
+        self.update_gpio_widget()
+        
         # Left widget for hex data
         self.log_output = QTextEdit()
         self.log_output.setReadOnly(True)
-        self.log_output.setMinimumHeight(100)
+        self.log_output.setMinimumHeight(150)
         
         # Middle widget for system information
         self.system_info_widget = QTextEdit()
         self.system_info_widget.setReadOnly(True)
-        self.system_info_widget.setMinimumHeight(100)
-        
+        self.system_info_widget.setMinimumHeight(150)
+
         # Right widget for phase angle analysis
         self.phase_angle_widget = QTextEdit()
         self.phase_angle_widget.setReadOnly(True)
-        self.phase_angle_widget.setMinimumHeight(100)
-        
+        self.phase_angle_widget.setMinimumHeight(150)
+
         # Create bottom layout to hold the three widgets
         bottom_layout = QHBoxLayout()
         bottom_layout.addWidget(self.log_output)
         bottom_layout.addWidget(self.system_info_widget)
         bottom_layout.addWidget(self.phase_angle_widget)
+        
+        # Add widgets to main layout
+        main_layout.addLayout(controls_layout)
+        main_layout.addLayout(overview_layout)
+        main_layout.addWidget(self.plot_widget, 1)  # Plot gets stretch factor of 1
+        main_layout.addLayout(bottom_layout, 1)  # Bottom layout gets equal stretch factor of 1
 
-        # --- Final Layout ---
-        layout = QVBoxLayout()
-        layout.addLayout(btn_layout)
-        layout.addWidget(self.plot_widget)
-        layout.addLayout(bottom_layout)  # Add the bottom layout instead of just log_output
+    def update_system_widget(self):
+        """Update the system overview widget"""
+        html_content = """
+        <style>
+            .widget-content {
+                font-family: 'Segoe UI', Arial, sans-serif;
+                margin: 0;
+                padding: 5px;
+                height: 100%;
+                background-color: #f8f9fa;
+                border-radius: 6px;
+            }
+            .title {
+                font-weight: bold;
+                color: #4285f4;
+                font-size: 13px;
+                margin-bottom: 5px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+            .info-table {
+                width: 100%;
+                border-collapse: collapse;
+            }
+            .info-row {
+                display: flex;
+                justify-content: space-between;
+                margin: 2px 0;
+            }
+            .info-name {
+                color: #555;
+                font-size: 12px;
+            }
+            .info-value {
+                font-weight: 500;
+                font-size: 12px;
+                color: #333;
+            }
+        </style>
+        <div class="widget-content">
+            <div class="title">📊 System</div>
+            <div class="info-row">
+                <span class="info-name">Model:</span>
+                <span class="info-value">STM32G4</span>
+            </div>
+            <div class="info-row">
+                <span class="info-name">Firmware:</span>
+                <span class="info-value">1.2.0</span>
+            </div>
+            <div class="info-row">
+                <span class="info-name">Max Voltage:</span>
+                <span class="info-value">3.3V</span>
+            </div>
+        </div>
+        """
+        self.system_widget.setHtml(html_content)
+        
+    def update_adc_widget(self):
+        """Update the ADC widget"""
+        html_content = """
+        <style>
+            .widget-content {
+                font-family: 'Segoe UI', Arial, sans-serif;
+                margin: 0;
+                padding: 5px;
+                height: 100%;
+                background-color: #f8f9fa;
+                border-radius: 6px;
+            }
+            .title {
+                font-weight: bold;
+                color: #4285f4;
+                font-size: 13px;
+                margin-bottom: 5px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+            .info-table {
+                width: 100%;
+                border-collapse: collapse;
+            }
+            .info-row {
+                display: flex;
+                justify-content: space-between;
+                margin: 2px 0;
+            }
+            .info-name {
+                color: #555;
+                font-size: 12px;
+            }
+            .info-value {
+                font-weight: 500;
+                font-size: 12px;
+                color: #333;
+            }
+        </style>
+        <div class="widget-content">
+            <div class="title">🔌 AD-Converter</div>
+            <div class="info-row">
+                <span class="info-name">Sampling Rate:</span>
+                <span class="info-value">10 kHz</span>
+            </div>
+            <div class="info-row">
+                <span class="info-name">Resolution:</span>
+                <span class="info-value">12-bit, ±1.65V</span>
+            </div>
+            <div class="info-row">
+                <span class="info-name">ADC Clock:</span>
+                <span class="info-value">PCLK/4</span>
+            </div>
+        </div>
+        """
+        self.adc_widget.setHtml(html_content)
+        
+    def update_signal_widget(self):
+        """Update the signal widget"""
+        html_content = """
+        <style>
+            .widget-content {
+                font-family: 'Segoe UI', Arial, sans-serif;
+                margin: 0;
+                padding: 5px;
+                height: 100%;
+                background-color: #f8f9fa;
+                border-radius: 6px;
+            }
+            .title {
+                font-weight: bold;
+                color: #4285f4;
+                font-size: 13px;
+                margin-bottom: 5px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+            .info-table {
+                width: 100%;
+                border-collapse: collapse;
+            }
+            .info-row {
+                display: flex;
+                justify-content: space-between;
+                margin: 2px 0;
+            }
+            .info-name {
+                color: #555;
+                font-size: 12px;
+            }
+            .info-value {
+                font-weight: 500;
+                font-size: 12px;
+                color: #333;
+            }
+        </style>
+        <div class="widget-content">
+            <div class="title">⚡ Current Signal</div>
+            <div class="info-row">
+                <span class="info-name">Amplitude:</span>
+                <span class="info-value">1.58V</span>
+            </div>
+            <div class="info-row">
+                <span class="info-name">Frequency:</span>
+                <span class="info-value">50.49 Hz</span>
+            </div>
+            <div class="info-row">
+                <span class="info-name">Rogowski:</span>
+                <span class="info-value">100mV/kA</span>
+            </div>
+        </div>
+        """
+        self.signal_widget.setHtml(html_content)
+        
+    def update_gpio_widget(self):
+        """Update the GPIO widget"""
+        html_content = """
+        <style>
+            .widget-content {
+                font-family: 'Segoe UI', Arial, sans-serif;
+                margin: 0;
+                padding: 5px;
+                height: 100%;
+                background-color: #f8f9fa;
+                border-radius: 6px;
+            }
+            .title {
+                font-weight: bold;
+                color: #4285f4;
+                font-size: 13px;
+                margin-bottom: 5px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+            .info-table {
+                width: 100%;
+                border-collapse: collapse;
+            }
+            .info-row {
+                display: flex;
+                justify-content: space-between;
+                margin: 2px 0;
+            }
+            .info-name {
+                color: #555;
+                font-size: 12px;
+            }
+            .info-value {
+                font-weight: 500;
+                font-size: 12px;
+                color: #333;
+            }
+        </style>
+        <div class="widget-content">
+            <div class="title">⏱️ GPIO Signal</div>
+            <div class="info-row">
+                <span class="info-name">Timing:</span>
+                <span class="info-value">μs precision</span>
+            </div>
+            <div class="info-row">
+                <span class="info-name">Trigger:</span>
+                <span class="info-value">Edge detection</span>
+            </div>
+            <div class="info-row">
+                <span class="info-name">Window:</span>
+                <span class="info-value">60 ms</span>
+            </div>
+        </div>
+        """
+        self.gpio_widget.setHtml(html_content)
+        
 
-        self.setLayout(layout)
-        self.set_controls_enabled(True)
 
     def start_plotting(self):
         if not self.is_running:
@@ -450,19 +762,7 @@ class LivePlotter(QWidget):
         """
         # Basic validation
         if not adc_times or len(adc_times) < 2 or len(adc_times) != len(adc_values):
-            print("Invalid data for zero-crossing detection")
             return []
-        print("Zero-crossing detection started")
-        # Convert voltage values back to raw ADC counts (0-4095)
-        # The formula used in frame.py is: voltage = (raw / 4095) * 3.3 - 1.65
-        # So to reverse: raw = ((voltage + 1.65) / 3.3) * 4095
-        raw_adc_values = []
-        for v in adc_values:
-            raw = ((v + 1.65) / 3.3) * 4095
-            raw_adc_values.append(raw)
-            
-        # The midpoint for raw ADC counts is 2048 (for 12-bit ADC)
-        midpoint = 2048
         
         # Apply time window if specified
         if start_time is None and end_time is None:
@@ -472,24 +772,24 @@ class LivePlotter(QWidget):
                 start_time = self.gpio_time_data[0]  # First GPIO timestamp
                 end_time = start_time + 60.0  # 60ms after trigger
         
-        # Find zero-crossings (where the signal crosses the midpoint)
+        # Find zero-crossings (where the signal changes sign)
         zero_crossings = []
-        for i in range(1, len(raw_adc_values)):
+        for i in range(1, len(adc_values)):
             # Check if this point is within our time window
             if start_time is not None and adc_times[i] < start_time:
                 continue
             if end_time is not None and adc_times[i] > end_time:
                 break
                 
-            # Check for midpoint crossing (raw ADC value crossing 2048)
-            if ((raw_adc_values[i-1] < midpoint and raw_adc_values[i] >= midpoint) or 
-                (raw_adc_values[i-1] >= midpoint and raw_adc_values[i] < midpoint)):
+            # Check for sign change (zero crossing)
+            if (adc_values[i-1] < 0 and adc_values[i] > 0) or \
+               (adc_values[i-1] > 0 and adc_values[i] < 0):
                 
-                # Use linear interpolation to find the exact crossing time
-                if raw_adc_values[i] != raw_adc_values[i-1]:  # Avoid division by zero
-                    t_ratio = (midpoint - raw_adc_values[i-1]) / (raw_adc_values[i] - raw_adc_values[i-1])
-                    t_cross = adc_times[i-1] + t_ratio * (adc_times[i] - adc_times[i-1])
-                    zero_crossings.append(t_cross)
+                # Use linear interpolation to find the exact zero-crossing time
+                if adc_values[i] != adc_values[i-1]:  # Avoid division by zero
+                    t_ratio = -adc_values[i-1] / (adc_values[i] - adc_values[i-1])
+                    t_zero = adc_times[i-1] + t_ratio * (adc_times[i] - adc_times[i-1])
+                    zero_crossings.append(t_zero)
         
         return zero_crossings
 
@@ -538,23 +838,15 @@ class LivePlotter(QWidget):
         
         # Find current zero-crossings from ADC data
         current_zero_crossings = []
-        print("ADC data:")
-        print(self.adc_time_data)
-        print(self.adc_signal_data)
         if self.adc_time_data and self.adc_signal_data and len(self.adc_time_data) == len(self.adc_signal_data):
-            # Use t_start as the start time and t_start + 60ms as the end time
-            start_time = t_start if t_start is not None else None
-            end_time = start_time + 60.0 if start_time is not None else None
-            
-            # Detect zero-crossings in the specified time window
-            print("Current zero-crossing detection started")
+            # Detect zero-crossings in the specified time window (from GPIO trigger to 60ms after)
             current_zero_crossings = self.detect_current_zero_crossings(
                 self.adc_time_data, 
                 self.adc_signal_data,
-                start_time,
-                end_time
+                t_start,  # Start from GPIO trigger
+                t_start + 60.0 if t_start is not None else None  # End 60ms after trigger
             )
-            print("Current zero-crossing detection finished")                
+                
         # Update the display with our findings
         self.update_arc_analysis_display(
             t_start, raw_end_time, pulse_pair_duration, t_end, t_arc,
@@ -573,32 +865,17 @@ class LivePlotter(QWidget):
         # Clear previous content
         self.system_info_widget.clear()
         
-        # Add title with timestamp
-        current_time = datetime.datetime.now().strftime("%H:%M:%S")
-        self.system_info_widget.append(f"<h3>⚡ Arc Analysis Results ({current_time})</h3>")
+        # Add title
+        self.system_info_widget.append("<h3>Arc Analysis</h3>")
         
-        # Add system information section
-        self.system_info_widget.append("<h4>System Information</h4>")
-        if hasattr(self, 'frame_processor'):
-            self.system_info_widget.append(f"<b>ADC Resolution:</b> {self.frame_processor.adc_resolution} bits")
-            self.system_info_widget.append(f"<b>Reference Voltage:</b> {self.frame_processor.vref:.2f} V")
-            self.system_info_widget.append(f"<b>Sampling Rate:</b> {self.frame_processor.sampling_rate_hz} Hz")
-            self.system_info_widget.append(f"<b>Sample Period:</b> {self.frame_processor.sample_period*1000:.3f} ms")
+        # Add arc timing information
+        self.system_info_widget.append("<h4>Arc Timing</h4>")
         
-        # Calculate and display signal information
-        if self.adc_signal_data:
-            signal_min = min(self.adc_signal_data)
-            signal_max = max(self.adc_signal_data)
-            signal_amplitude = signal_max - signal_min
-            self.system_info_widget.append(f"<b>Current Signal Amplitude:</b> {signal_amplitude:.3f} V")
-        
-        # Add arc timing information section
-        self.system_info_widget.append("<h4>Arc Timing Analysis</h4>")
         if t_start is not None:
             self.system_info_widget.append(f"<b>Arc Start Time:</b> {t_start:.3f} ms")
         else:
             self.system_info_widget.append("<b>Arc Start Time:</b> Not detected")
-            
+        
         if raw_end_time is not None:
             self.system_info_widget.append(f"<b>Raw End Time:</b> {raw_end_time:.3f} ms")
         else:
@@ -606,7 +883,7 @@ class LivePlotter(QWidget):
             
         if pulse_pair_duration is not None:
             self.system_info_widget.append(f"<b>Pulse Pair Duration:</b> {pulse_pair_duration:.3f} ms")
-            
+        
         if t_end is not None:
             self.system_info_widget.append(f"<b>Corrected End Time:</b> {t_end:.3f} ms")
         else:
@@ -618,22 +895,19 @@ class LivePlotter(QWidget):
             self.system_info_widget.append("<b>Arc Duration:</b> Not detected")
         
         # Add voltage zero-crossing information
+        # Include corrected end time as the first voltage zero-crossing
+        all_voltage_crossings = []
+        if t_end is not None:
+            all_voltage_crossings.append(t_end)  # Add corrected end time as first zero-crossing
+        all_voltage_crossings.extend(voltage_zero_crossings)  # Add the rest of the zero-crossings
+        
         self.system_info_widget.append("<h4>Voltage Zero-Crossings</h4>")
-        self.system_info_widget.append(f"<b>Number of Voltage Zero-Crossings:</b> {len(voltage_zero_crossings)}")
-        if voltage_zero_crossings:
+        self.system_info_widget.append(f"<b>Number of Voltage Zero-Crossings:</b> {len(all_voltage_crossings)}")
+        
+        if all_voltage_crossings:
             self.system_info_widget.append("<b>Voltage Zero-Crossing Timestamps (ms):</b>")
-            # Include corrected end time as the first timestamp
-            if t_end is not None:
-                self.system_info_widget.append(f"  1. {t_end:.3f}")
-                # Continue with the actual zero-crossings, starting from index 2
-                for i, zc in enumerate(voltage_zero_crossings[:9]):  # Show up to 9 more to avoid cluttering
-                    self.system_info_widget.append(f"  {i+2}. {zc:.3f}")
-            else:
-                # If no corrected end time, just show the zero-crossings
-                for i, zc in enumerate(voltage_zero_crossings[:10]):  # Show first 10 only to avoid cluttering
-                    self.system_info_widget.append(f"  {i+1}. {zc:.3f}")
-            if len(voltage_zero_crossings) > 10:
-                self.system_info_widget.append(f"  ... and {len(voltage_zero_crossings) - 10} more")
+            for i, zc in enumerate(all_voltage_crossings):
+                self.system_info_widget.append(f"  {i+1}. {zc:.3f}")
         
         # Add current zero-crossing information
         self.system_info_widget.append("<h4>Current Zero-Crossings</h4>")
@@ -645,9 +919,129 @@ class LivePlotter(QWidget):
                 self.system_info_widget.append(f"  {i+1}. {zc:.3f}")
             if len(current_zero_crossings) > 10:
                 self.system_info_widget.append(f"  ... and {len(current_zero_crossings) - 10} more")
-        
-        # This section is now handled above
+                
+        # Calculate phase angle between voltage and current
+        self.update_phase_angle_display(all_voltage_crossings, current_zero_crossings)
 
+    def update_phase_angle_display(self, voltage_zero_crossings, current_zero_crossings):
+        """
+        Calculate and display the phase angle between voltage and current zero-crossings.
+        
+        Args:
+            voltage_zero_crossings: List of voltage zero-crossing timestamps in ms
+            current_zero_crossings: List of current zero-crossing timestamps in ms
+        """
+        # Create a new widget for phase angle display if it doesn't exist
+        if not hasattr(self, 'phase_angle_widget'):
+            self.phase_angle_widget = QTextEdit()
+            self.phase_angle_widget.setReadOnly(True)
+            self.right_layout.addWidget(self.phase_angle_widget)
+        
+        # Check if we have both voltage and current zero-crossings
+        if not voltage_zero_crossings or not current_zero_crossings:
+            html_content = """
+            <div style="padding: 15px; background-color: #f8f9fa; border-radius: 6px;">
+                <h3 style="color: #4285f4; margin-top: 0;">Phase Analysis & Insights</h3>
+                <p style="color: #d32f2f; font-weight: bold;">Insufficient data for phase angle calculation</p>
+                <p>No voltage or current zero-crossings detected in the analyzed time window.</p>
+            </div>
+            """
+            self.phase_angle_widget.setHtml(html_content)
+            return
+        
+        # Calculate the period of the signal (time between consecutive zero-crossings)
+        period_ms = None
+        if len(voltage_zero_crossings) >= 2:
+            period_ms = voltage_zero_crossings[1] - voltage_zero_crossings[0]
+        elif len(current_zero_crossings) >= 2:
+            period_ms = current_zero_crossings[1] - current_zero_crossings[0]
+        
+        # If we couldn't determine the period, assume 60Hz (16.67ms period)
+        if period_ms is None or period_ms <= 0:
+            period_ms = 1000 / 60  # 60Hz = 16.67ms period
+        
+        frequency = 1000 / period_ms if period_ms > 0 else 60
+            
+        # For each voltage zero-crossing, find the closest current zero-crossing
+        phase_angles = []
+        pairs_analyzed = 0
+        phase_pairs = []
+        
+        # Limit analysis to first 5 voltage zero-crossings to avoid overwhelming the display
+        for v_idx, v_zc in enumerate(voltage_zero_crossings[:5]):
+            # Find the closest current zero-crossing
+            closest_c_zc = None
+            min_distance = float('inf')
+            
+            for c_zc in current_zero_crossings:
+                distance = abs(c_zc - v_zc)
+                if distance < min_distance:
+                    min_distance = distance
+                    closest_c_zc = c_zc
+            
+            if closest_c_zc is not None:
+                # Calculate phase angle
+                time_diff_ms = closest_c_zc - v_zc
+                # Normalize time difference to be within half a period
+                if abs(time_diff_ms) > period_ms / 2:
+                    if time_diff_ms > 0:
+                        time_diff_ms -= period_ms
+                    else:
+                        time_diff_ms += period_ms
+                
+                phase_angle = (time_diff_ms / period_ms) * 360
+                phase_angles.append(phase_angle)
+                
+                # Determine if current leads or lags voltage
+                direction = "→" if phase_angle > 0 else "←"
+                
+                # Display the pair and calculation
+                self.phase_angle_widget.append(
+                    f"• Current @ <b>{closest_c_zc:.3f}</b> ms — Voltage @ <b>{v_zc:.3f}</b> ms ⇒ Φ = <b>{phase_angle:.1f}°</b> {direction}")
+                pairs_analyzed += 1
+        
+        # Calculate statistics if we have phase angles
+        if phase_angles:
+            mean_phase = sum(phase_angles) / len(phase_angles)
+            min_phase = min(phase_angles)
+            max_phase = max(phase_angles)
+            
+            # Display statistics with color coding
+            self.phase_angle_widget.append("<br>")
+            self.phase_angle_widget.append(f"<span style='color:#4CAF50;'>📊 Mean Phase Angle: <b>{mean_phase:.1f}°</b></span>")
+            self.phase_angle_widget.append(f"<span style='color:#2196F3;'>📉 Min: <b>{min_phase:.1f}°</b>, 📈 Max: <b>{max_phase:.1f}°</b></span>")
+            self.phase_angle_widget.append(f"<span style='color:#FFC107;'>🔍 Pairs Analyzed: <b>{pairs_analyzed}</b></span>")
+            
+            # Calculate power factor based on mean phase angle
+            power_factor = abs(math.cos(math.radians(mean_phase)))
+            
+            # Determine load type based on phase angle
+            if abs(mean_phase) < 5:  # Close to 0 degrees
+                load_type = "Resistive"
+                color = "#9C27B0"
+            elif mean_phase < 0:  # Current leads voltage
+                load_type = "Capacitive"
+                color = "#2196F3"
+            else:  # Voltage leads current
+                load_type = "Inductive"
+                color = "#FF9800"
+            
+            # Add a legend
+            self.phase_angle_widget.append("<br>")
+            self.phase_angle_widget.append("<b>Legend:</b>")
+            self.phase_angle_widget.append("<span style='color:#FFC107;'>⚡: Current</span>, <span style='color:#2196F3;'>⚡: Voltage</span>, <span style='color:#4CAF50;'>⊕: Zero-Crossing</span>, <span style='color:#FF5722;'>🔥: Arc</span>, <span style='color:#9C27B0;'>Φ: Phase</span>, <span style='color:#795548;'>⏱: Duration</span>")
+            
+            # Add detailed insights
+            self.phase_angle_widget.append("<br>")
+            self.phase_angle_widget.append("<h4>Circuit Analysis</h4>")
+            self.phase_angle_widget.append(f"<span style='color:{color};'><b>Load Type:</b> {load_type}</span>")
+            self.phase_angle_widget.append(f"<b>Power Factor:</b> {power_factor:.3f}")
+            self.phase_angle_widget.append(f"<b>Signal Period:</b> {period_ms:.2f} ms")
+            self.phase_angle_widget.append(f"<b>Frequency:</b> {1000/period_ms:.1f} Hz")
+        else:
+            self.phase_angle_widget.append("<b>Phase Angle:</b> Could not calculate - insufficient data pairs")
+
+    
     def handle_gpio_data(self, data):
         # Initialize with safe defaults if no previous data exists
         timestamps = [self.gpio_time_data[-1]] if self.gpio_time_data else [0.0]
