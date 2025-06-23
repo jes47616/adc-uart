@@ -1008,6 +1008,10 @@ class LivePlotter(QWidget):
         self.phase_angle_widget.clear()
         self.phase_angle_widget.append('<h3 style="color: #4285f4; margin-top: 0;">⚡ Phase Angle Analysis ⚡</h3>')
         
+        # Add a note about which signal is being used for current zero-crossing detection
+        signal_type = "Integrated Current" if hasattr(self, 'showing_integrated') and self.showing_integrated else "Raw dI/dt"
+        self.phase_angle_widget.append(f'<p style="color: #4CAF50;"><b>Signal used:</b> {signal_type}</p>')
+        
         # Check if we have both voltage and current zero-crossings
         if not voltage_zero_crossings or not current_zero_crossings:
             html_content = """
@@ -1123,6 +1127,8 @@ class LivePlotter(QWidget):
             self.adc_curve.setData(self.adc_time_data, self.adc_signal_data)
             self.showing_integrated = False
             self.signal_toggle_btn.setText("Show Current (Integrated)")
+            # Update the zero-crossing detection and phase angle analysis with the raw data
+            self.process_arc_analysis()
         else:
             if len(self.integrated_adc_data) == len(self.adc_time_data):
                 # Recalculate integration with latest improvements
@@ -1130,6 +1136,8 @@ class LivePlotter(QWidget):
                 self.adc_curve.setData(self.adc_time_data, self.integrated_adc_data)
                 self.showing_integrated = True
                 self.signal_toggle_btn.setText("Show dI/dt (Raw)")
+                # Update the zero-crossing detection and phase angle analysis with the integrated data
+                self.process_arc_analysis()
             else:
                 print("Cannot show integrated signal: lengths don't match")
                 
