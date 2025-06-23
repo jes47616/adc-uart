@@ -72,6 +72,7 @@ class LivePlotter(QWidget):
         # Data buffers
         self.adc_time_data = []
         self.adc_signal_data = []
+        self.integrated_adc_data = []  # Store integrated current values
 
         # Digital signal data
         self.gpio_time_data = []
@@ -142,6 +143,12 @@ class LivePlotter(QWidget):
         
         self.reset_btn = QPushButton("Reset")
         self.reset_btn.setStyleSheet("background-color: #F44336; color: white; font-weight: bold;")
+        
+        # Add a toggle button for raw/integrated signal
+        self.signal_toggle_btn = QPushButton("Show Current (Integrated)")
+        self.signal_toggle_btn.clicked.connect(self.toggle_signal_view)
+        self.signal_toggle_btn.setStyleSheet("background-color: #9C27B0; color: white;")
+        self.showing_integrated = False
 
         self.start_btn.clicked.connect(self.start_plotting)
         self.stop_btn.clicked.connect(self.stop_plotting)
@@ -155,6 +162,7 @@ class LivePlotter(QWidget):
         controls_layout.addWidget(self.trgmode_btn)
         controls_layout.addWidget(self.intmode_btn)
         controls_layout.addWidget(self.reset_btn)
+        controls_layout.addWidget(self.signal_toggle_btn)
         
         # Add widgets to overview layout
         overview_layout.addWidget(self.system_widget)
@@ -427,7 +435,56 @@ class LivePlotter(QWidget):
         """
         self.gpio_widget.setHtml(html_content)
         
-
+    def integrate_adc_signal(self):
+        """
+        Integrate the Rogowski coil signal (dI/dt) to get the actual current (I).
+        Uses the trapezoidal rule for numerical integration with improved drift correction
+        and proper scaling.
+        """
+        if len(self.adc_time_data) < 2 or len(self.adc_signal_data) < 2:
+            return []
+            
+        # Reset integrated data
+        integrated = []
+        
+        # Remove any DC offset from the input signal first
+        # This helps prevent linear drift in the integrated result
+        signal_mean = sum(self.adc_signal_data) / len(self.adc_signal_data)
+        centered_signal = [val - signal_mean for val in self.adc_signal_data]
+        
+        # Use cumulative trapezoidal integration
+        # This is more efficient than the previous point-by-point approach
+        dt_values = []
+        for i in range(1, len(self.adc_time_data)):
+            dt_values.append(self.adc_time_data[i] - self.adc_time_data[i-1])
+        
+        # Handle the first point separately
+        integrated.append(0)  # Start with zero as initial condition
+        
+        # Perform trapezoidal integration
+        for i in range(1, len(centered_signal)):
+            # Trapezoidal rule: area = (y1+y2)/2 * dt
+            y_avg = (centered_signal[i] + centered_signal[i-1]) / 2
+            area = y_avg * dt_values[i-1]
+            integrated.append(integrated[-1] + area)
+            
+        # Apply a high-pass filter to remove remaining drift
+        if len(integrated) > 10:
+            # Improved high-pass filter with better parameters
+            window_size = min(30, len(integrated) // 4)
+            if window_size > 1:
+                # Use numpy for more efficient computation
+                moving_avg = np.convolve(integrated, np.ones(window_size)/window_size, mode='same')
+                # Subtract moving average (acts as high-pass filter)
+                integrated = [integrated[i] - moving_avg[i] for i in range(len(integrated))]
+        
+        # Apply scaling factor (calibration constant for the Rogowski coil)
+        # This value would ideally be determined through calibration
+        # For now, we'll use a placeholder value that can be adjusted
+        scaling_factor = 1.5  # Adjust based on calibration
+        integrated = [val * scaling_factor for val in integrated]
+        
+        return integrated
 
     def start_plotting(self):
         if not self.is_running:
@@ -435,6 +492,7 @@ class LivePlotter(QWidget):
             self.set_controls_enabled(False)  # Disable other controls
             self.adc_time_data.clear()
             self.adc_signal_data.clear()
+            self.integrated_adc_data.clear()
             self.gpio_time_data.clear()
             self.gpio_signal_data.clear()
             self.gpio_binary_data.clear()
@@ -451,6 +509,7 @@ class LivePlotter(QWidget):
         self.start_btn.setEnabled(enabled)
         self.stop_btn.setEnabled(not enabled)  # Stop enabled only when plotting
         self.reset_btn.setEnabled(enabled)
+        self.signal_toggle_btn.setEnabled(enabled)
 
     def stop_plotting(self):
         if self.is_running:
@@ -505,6 +564,7 @@ class LivePlotter(QWidget):
                 )  # Use all 4 bytes for timestamp
                 self.adc_time_data.clear()
                 self.adc_signal_data.clear()
+                self.integrated_adc_data.clear()
                 self.gpio_time_data.clear()
                 self.gpio_signal_data.clear()
                 self.gpio_binary_data.clear()
@@ -545,10 +605,15 @@ class LivePlotter(QWidget):
                     # Update time and voltage data
                     self.adc_time_data.extend(times)
                     self.adc_signal_data.extend(voltages)
+                    
+                    # Integrate the ADC signal to get current
+                    self.integrated_adc_data = self.integrate_adc_signal()
 
-                    # Update the plot
-                    # print("Adding ADC data to plot")
-                    self.adc_curve.setData(self.adc_time_data, self.adc_signal_data)
+                    # Update the plot with either raw or integrated data based on toggle state
+                    if hasattr(self, 'showing_integrated') and self.showing_integrated:
+                        self.adc_curve.setData(self.adc_time_data, self.integrated_adc_data)
+                    else:
+                        self.adc_curve.setData(self.adc_time_data, self.adc_signal_data)
 
                 else:
                     print("No ADC data found")
@@ -749,20 +814,22 @@ class LivePlotter(QWidget):
 
     def detect_current_zero_crossings(self, adc_times, adc_values, start_time=None, end_time=None):
         """
-        Detect zero-crossings in the ADC current signal.
+        Detect zero-crossings in the current signal.
         
         Args:
-            adc_times: List of ADC timestamps in ms
-            adc_values: List of ADC voltage values (centered around 0V)
-            start_time: Optional, only include zero-crossings after this time
-            end_time: Optional, only include zero-crossings up to this time
+            adc_times: List of timestamps in ms
+            adc_values: List of ADC values
+            start_time: Optional start time to limit detection window
+            end_time: Optional end time to limit detection window
             
         Returns:
             List of zero-crossing timestamps in ms
         """
-        # Basic validation
-        if not adc_times or len(adc_times) < 2 or len(adc_times) != len(adc_values):
+        if not adc_times or len(adc_times) < 2 or len(adc_values) != len(adc_times):
             return []
+        
+        # Use integrated values for zero-crossing detection if available and same length
+        values_to_use = self.integrated_adc_data if hasattr(self, 'showing_integrated') and self.showing_integrated and len(self.integrated_adc_data) == len(adc_values) else adc_values
         
         # Apply time window if specified
         if start_time is None and end_time is None:
@@ -774,7 +841,7 @@ class LivePlotter(QWidget):
         
         # Find zero-crossings (where the signal changes sign)
         zero_crossings = []
-        for i in range(1, len(adc_values)):
+        for i in range(1, len(adc_times)):
             # Check if this point is within our time window
             if start_time is not None and adc_times[i] < start_time:
                 continue
@@ -782,12 +849,12 @@ class LivePlotter(QWidget):
                 break
                 
             # Check for sign change (zero crossing)
-            if (adc_values[i-1] < 0 and adc_values[i] > 0) or \
-               (adc_values[i-1] > 0 and adc_values[i] < 0):
+            if (values_to_use[i-1] < 0 and values_to_use[i] > 0) or \
+               (values_to_use[i-1] > 0 and values_to_use[i] < 0):
                 
                 # Use linear interpolation to find the exact zero-crossing time
-                if adc_values[i] != adc_values[i-1]:  # Avoid division by zero
-                    t_ratio = -adc_values[i-1] / (adc_values[i] - adc_values[i-1])
+                if values_to_use[i] != values_to_use[i-1]:  # Avoid division by zero
+                    t_ratio = -values_to_use[i-1] / (values_to_use[i] - values_to_use[i-1])
                     t_zero = adc_times[i-1] + t_ratio * (adc_times[i] - adc_times[i-1])
                     zero_crossings.append(t_zero)
         
@@ -1050,6 +1117,22 @@ class LivePlotter(QWidget):
             self.phase_angle_widget.append("<b>Phase Angle:</b> Could not calculate - insufficient data pairs")
 
     
+    def toggle_signal_view(self):
+        """Toggle between raw ADC signal and integrated current signal."""
+        if hasattr(self, 'showing_integrated') and self.showing_integrated:
+            self.adc_curve.setData(self.adc_time_data, self.adc_signal_data)
+            self.showing_integrated = False
+            self.signal_toggle_btn.setText("Show Current (Integrated)")
+        else:
+            if len(self.integrated_adc_data) == len(self.adc_time_data):
+                # Recalculate integration with latest improvements
+                self.integrated_adc_data = self.integrate_adc_signal()
+                self.adc_curve.setData(self.adc_time_data, self.integrated_adc_data)
+                self.showing_integrated = True
+                self.signal_toggle_btn.setText("Show dI/dt (Raw)")
+            else:
+                print("Cannot show integrated signal: lengths don't match")
+                
     def handle_gpio_data(self, data):
         # Initialize with safe defaults if no previous data exists
         timestamps = [self.gpio_time_data[-1]] if self.gpio_time_data else [0.0]
