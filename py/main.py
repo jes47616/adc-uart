@@ -1374,30 +1374,64 @@ class LivePlotter(QWidget):
         self.update_signal_widget()
 
     def calculate_adc_offset(self):
-        """Calculate the offset of the ADC signal using an improved method."""
+        """
+        Calculate the offset of the ADC signal using a robust method that accounts for signal asymmetry.
+        This improved algorithm ensures better zero-centering even with distorted waveforms.
+        """
         if not self.adc_signal_data:
             self.adc_offset = 0.0
             return
 
-        # Use the most recent data for better adaptation to signal changes
-        recent_data = self.adc_signal_data[
-            -min(self.offset_window_size, len(self.adc_signal_data)) :
-        ]
+        # Use a larger window size for more stable offset calculation
+        # This helps to cover multiple complete cycles for better accuracy
+        window_size = min(2000, len(self.adc_signal_data))
+        recent_data = self.adc_signal_data[-window_size:]
 
         if not recent_data:
             self.adc_offset = 0.0
             return
 
-        # Find the peak-to-peak amplitude and midpoint
+        # Method 1: Standard min-max midpoint
         min_val = min(recent_data)
         max_val = max(recent_data)
+        midpoint_offset = (min_val + max_val) / 2
 
-        # Use midpoint between min and max as the offset
-        # This is more accurate for signals that aren't perfectly sinusoidal
-        self.adc_offset = (min_val + max_val) / 2
+        # Method 2: Mean value (works better for asymmetrical waveforms)
+        mean_offset = sum(recent_data) / len(recent_data)
+
+        # Method 3: Median (robust against outliers)
+        sorted_data = sorted(recent_data)
+        median_offset = sorted_data[len(sorted_data) // 2]
+
+        # Method 4: Zero-crossing average (finds the values just before zero crossings)
+        zero_cross_values = []
+        for i in range(1, len(recent_data)):
+            if (recent_data[i-1] < midpoint_offset and recent_data[i] >= midpoint_offset) or \
+               (recent_data[i-1] >= midpoint_offset and recent_data[i] < midpoint_offset):
+                # Average the values around potential zero crossing
+                zero_cross_values.append((recent_data[i-1] + recent_data[i]) / 2)
+        
+        zero_crossing_offset = sum(zero_cross_values) / len(zero_cross_values) if zero_cross_values else midpoint_offset
+
+        # Weighted combination of all methods for robust offset calculation
+        # For sine waves, mean and median should be very close to the true offset
+        # If they differ, we likely have an asymmetrical or distorted waveform
+        if abs(mean_offset - median_offset) < 0.1:  # Small difference indicates symmetrical signal
+            self.adc_offset = (mean_offset * 0.5) + (midpoint_offset * 0.3) + (zero_crossing_offset * 0.2)
+        else:  # Larger difference suggests asymmetry
+            # For asymmetrical signals, the median and zero-crossing methods often work better
+            self.adc_offset = (median_offset * 0.4) + (zero_crossing_offset * 0.4) + (mean_offset * 0.2)
+
+        # Apply a small amount of smoothing with previous offset (if it exists)
+        if hasattr(self, 'prev_adc_offset'):
+            self.adc_offset = 0.8 * self.adc_offset + 0.2 * self.prev_adc_offset
+        
+        # Store current offset for future smoothing
+        self.prev_adc_offset = self.adc_offset
 
         print(
-            f"Calculated ADC offset: {self.adc_offset:.4f} V (min: {min_val:.4f}, max: {max_val:.4f})"
+            f"Calculated ADC offset: {self.adc_offset:.4f} V "
+            f"(min: {min_val:.4f}, max: {max_val:.4f}, mean: {mean_offset:.4f}, median: {median_offset:.4f})"
         )
 
     def handle_gpio_data(self, data):
