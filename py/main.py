@@ -122,10 +122,14 @@ class LivePlotter(QWidget):
         self.plot_widget.setLabel("bottom", "Time", "ms")
         self.plot_widget.setYRange(-2.0, 2.0)  # Adjusted for centered signal
 
-        # Create curves for both signals
+        # Create curves for all signals
         self.adc_curve = self.plot_widget.plot(
             [], [], pen=pg.mkPen("b", width=2), name="Rogowski Coil (dI/dt)"
         )
+        self.integrated_curve = self.plot_widget.plot(
+            [], [], pen=pg.mkPen("#FF8C00", width=2), name="Current (kA)"
+        )
+        self.integrated_curve.setVisible(False)  # Initially hidden
         self.gpio_curve = self.plot_widget.plot(
             [], [], pen=pg.mkPen("r", width=2), name="LED Signal"
         )
@@ -169,7 +173,7 @@ class LivePlotter(QWidget):
         )
 
         # Add a toggle button for raw/integrated signal
-        self.signal_toggle_btn = QPushButton("Show Current (Integrated)")
+        self.signal_toggle_btn = QPushButton("Show Current (kA)")
         self.signal_toggle_btn.clicked.connect(self.toggle_signal_view)
         self.signal_toggle_btn.setStyleSheet("background-color: #9C27B0; color: white;")
         self.showing_integrated = False
@@ -342,7 +346,7 @@ class LivePlotter(QWidget):
             <div class="title">🔌 AD-Converter</div>
             <div class="info-row">
                 <span class="info-name">Sampling Rate:</span>
-                <span class="info-value">10 kHz</span>
+                <span class="info-value">5 kHz</span>
             </div>
             <div class="info-row">
                 <span class="info-name">Resolution:</span>
@@ -358,17 +362,22 @@ class LivePlotter(QWidget):
 
     def update_signal_widget(self):
         """Update the signal widget"""
-        html_content = """
+        # Calculate actual amplitude and frequency
+        amplitude = self.calculate_signal_amplitude()
+        frequency = self.calculate_signal_frequency()
+        
+        # HTML-Inhalt mit den dynamischen Werten
+        html_content = f"""
         <style>
-            .widget-content {
+            .widget-content {{
                 font-family: 'Segoe UI', Arial, sans-serif;
                 margin: 0;
                 padding: 5px;
                 height: 100%;
                 background-color: #f8f9fa;
                 border-radius: 6px;
-            }
-            .title {
+            }}
+            .title {{
                 font-weight: bold;
                 color: #4285f4;
                 font-size: 13px;
@@ -376,35 +385,35 @@ class LivePlotter(QWidget):
                 display: flex;
                 align-items: center;
                 justify-content: center;
-            }
-            .info-table {
+            }}
+            .info-table {{
                 width: 100%;
                 border-collapse: collapse;
-            }
-            .info-row {
+            }}
+            .info-row {{
                 display: flex;
                 justify-content: space-between;
                 margin: 2px 0;
-            }
-            .info-name {
+            }}
+            .info-name {{
                 color: #555;
                 font-size: 12px;
-            }
-            .info-value {
+            }}
+            .info-value {{
                 font-weight: 500;
                 font-size: 12px;
                 color: #333;
-            }
+            }}
         </style>
         <div class="widget-content">
             <div class="title">⚡ Current Signal</div>
             <div class="info-row">
                 <span class="info-name">Amplitude:</span>
-                <span class="info-value">1.58V</span>
+                <span class="info-value">{amplitude:.2f}V</span>
             </div>
             <div class="info-row">
                 <span class="info-name">Frequency:</span>
-                <span class="info-value">95.88 Hz</span>
+                <span class="info-value">{frequency:.2f} Hz</span>
             </div>
             <div class="info-row">
                 <span class="info-name">Rogowski:</span>
@@ -423,6 +432,7 @@ class LivePlotter(QWidget):
                 <span class="info-value">{self.adc_offset:.4f} V (corrected)</span>
             </div>
             """
+        html_content += "</div>"
         self.signal_widget.setHtml(html_content)
 
     def update_gpio_widget(self):
@@ -1070,38 +1080,36 @@ class LivePlotter(QWidget):
         # Clear previous content
         self.system_info_widget.clear()
 
-        # Add title
-        self.system_info_widget.append("<h3>Arc Analysis</h3>")
+        # Add title with styling
+        self.system_info_widget.append('<h3 style="color: #4285f4; margin-bottom: 10px;">Arc Analysis</h3>')
 
-        # Add arc timing information
-        self.system_info_widget.append("<h4>Arc Timing</h4>")
-
+        # Arc timing information
         if t_start is not None:
-            self.system_info_widget.append(f"<b>Arc Start Time:</b> {t_start:.3f} ms")
+            self.system_info_widget.append(f'<span style="color: #4CAF50;"><b>Arc Start Time:</b> {t_start:.3f} ms</span>')
         else:
-            self.system_info_widget.append("<b>Arc Start Time:</b> Not detected")
+            self.system_info_widget.append('<span style="color: #4CAF50;"><b>Arc Start Time:</b> Not detected</span>')
 
         if raw_end_time is not None:
             self.system_info_widget.append(
-                f"<b>Raw End Time:</b> {raw_end_time:.3f} ms"
+                f'<span style="color: #FF9800;"><b>Raw End Time:</b> {raw_end_time:.3f} ms</span>'
             )
         else:
-            self.system_info_widget.append("<b>Raw End Time:</b> Not detected")
+            self.system_info_widget.append('<span style="color: #FF9800;"><b>Raw End Time:</b> Not detected</span>')
 
         if pulse_pair_duration is not None:
             self.system_info_widget.append(
-                f"<b>Pulse Pair Duration:</b> {pulse_pair_duration:.3f} ms"
+                f'<span style="color: #9C27B0;"><b>Pulse Pair Duration:</b> {pulse_pair_duration:.3f} ms</span>'
             )
 
         if t_end is not None:
-            self.system_info_widget.append(f"<b>Corrected End Time:</b> {t_end:.3f} ms")
+            self.system_info_widget.append(f'<span style="color: #F44336;"><b>Corrected End Time:</b> {t_end:.3f} ms</span>')
         else:
-            self.system_info_widget.append("<b>Corrected End Time:</b> Not detected")
+            self.system_info_widget.append('<span style="color: #F44336;"><b>Corrected End Time:</b> Not detected</span>')
 
         if t_arc is not None:
-            self.system_info_widget.append(f"<b>Arc Duration:</b> {t_arc:.3f} ms")
+            self.system_info_widget.append(f'<span style="color: #2196F3;"><b>Arc Duration:</b> {t_arc:.3f} ms</span>')
         else:
-            self.system_info_widget.append("<b>Arc Duration:</b> Not detected")
+            self.system_info_widget.append('<span style="color: #2196F3;"><b>Arc Duration:</b> Not detected</span>')
 
         # Add voltage zero-crossing information
         # Include corrected end time as the first voltage zero-crossing
@@ -1114,28 +1122,16 @@ class LivePlotter(QWidget):
             voltage_zero_crossings
         )  # Add the rest of the zero-crossings
 
-        self.system_info_widget.append("<h4>Voltage Zero-Crossings</h4>")
-        self.system_info_widget.append(
-            f"<b>Number of Voltage Zero-Crossings:</b> {len(all_voltage_crossings)}"
-        )
+        self.system_info_widget.append('<h3 style="color: #FF5722; margin-top: 15px;">Voltage Zero-Crossings</h3>')
 
         if all_voltage_crossings:
-            self.system_info_widget.append(
-                "<b>Voltage Zero-Crossing Timestamps (ms):</b>"
-            )
             for i, zc in enumerate(all_voltage_crossings):
                 self.system_info_widget.append(f"  {i+1}. {zc:.3f}")
 
         # Add current zero-crossing information
-        self.system_info_widget.append("<h4>Current Zero-Crossings</h4>")
-        self.system_info_widget.append(
-            f"<b>Number of Current Zero-Crossings:</b> {len(current_zero_crossings)}"
-        )
+        self.system_info_widget.append('<h4 style="color: #00BCD4; margin-top: 10px;">Current Zero-Crossings</h4>')
 
         if current_zero_crossings:
-            self.system_info_widget.append(
-                "<b>Current Zero-Crossing Timestamps (ms):</b>"
-            )
             for i, zc in enumerate(current_zero_crossings[:10]):  # Show first 10 only
                 self.system_info_widget.append(f"  {i+1}. {zc:.3f}")
             if len(current_zero_crossings) > 10:
@@ -1310,38 +1306,31 @@ class LivePlotter(QWidget):
         self.showing_integrated = not self.showing_integrated
 
         if self.showing_integrated:
-            # Show integrated signal
+            # Show integrated signal alongside raw signal
             self.integrated_adc_data = self.integrate_adc_signal()
-            self.adc_curve.setData(self.adc_time_data, self.integrated_adc_data)
-            self.adc_curve.setPen(
-                pg.mkPen("#FF8C00", width=2)
-            )  # Change to orange for integrated signal
-            self.adc_curve.opts["name"] = (
-                "Current (kA)"  # Update name in legend to show Kiloamperes
-            )
-            self.signal_toggle_btn.setText("Show Raw Signal (dI/dt)")
-            # Update Y axis label to show Kiloamperes
-            self.plot_widget.setLabel("left", "Current", "kA")
+            self.integrated_curve.setData(self.adc_time_data, self.integrated_adc_data)
+            self.integrated_curve.setVisible(True)
+            
+            # Show the right axis with current in kA
+            self.plot_widget.getAxis('right').setLabel('Current', 'kA')
+            self.plot_widget.showAxis('right')
+            
+            # Update button text
+            self.signal_toggle_btn.setText("Hide Current (kA)")
+            
             # Update the zero-crossing detection and phase angle analysis with the integrated data
             self.process_arc_analysis()
         else:
-            # Show raw signal
+            # Hide integrated signal but keep raw signal visible
+            self.integrated_curve.setVisible(False)
+            
+            # Hide the right axis if it exists
+            if hasattr(self, 'right_axis'):
+                self.plot_widget.showAxis('right', False)
+            
+            # Update button text
             self.signal_toggle_btn.setText("Show Current (kA)")
-            self.adc_curve.setPen(
-                pg.mkPen("b", width=2)
-            )  # Change back to blue for raw signal
-            self.adc_curve.opts["name"] = (
-                "Rogowski Coil (dI/dt)"  # Update name in legend
-            )
-            # Restore Y axis label to show Voltage
-            self.plot_widget.setLabel("left", "Voltage", "V")
-            # Apply offset correction if enabled
-            if self.offset_correction_enabled:
-                plot_data = [v - self.adc_offset for v in self.adc_signal_data]
-                self.adc_curve.setData(self.adc_time_data, plot_data)
-            else:
-                self.adc_curve.setData(self.adc_time_data, self.adc_signal_data)
-
+            
             # Update the zero-crossing detection and phase angle analysis with the raw data
             self.process_arc_analysis()
 
@@ -1433,6 +1422,63 @@ class LivePlotter(QWidget):
             f"Calculated ADC offset: {self.adc_offset:.4f} V "
             f"(min: {min_val:.4f}, max: {max_val:.4f}, mean: {mean_offset:.4f}, median: {median_offset:.4f})"
         )
+
+    def calculate_signal_amplitude(self):
+        """
+        Calculate the actual amplitude of the ADC signal.
+        Returns the peak-to-peak amplitude in volts.
+        """
+        if not self.adc_signal_data or len(self.adc_signal_data) < 10:
+            return 0.0
+            
+        # Apply offset correction if enabled
+        signal_data = self.adc_signal_data
+        if self.offset_correction_enabled:
+            signal_data = [v - self.adc_offset for v in signal_data]
+            
+        # Calculate peak-to-peak amplitude
+        max_val = max(signal_data)
+        min_val = min(signal_data)
+        amplitude = max_val - min_val
+        
+        return amplitude
+        
+    def calculate_signal_frequency(self):
+        """
+        Calculate the actual frequency of the ADC signal using zero-crossing method.
+        Returns the frequency in Hz.
+        """
+        if not self.adc_signal_data or len(self.adc_signal_data) < 100:
+            return 0.0
+            
+        # Apply offset correction if enabled
+        signal_data = self.adc_signal_data
+        if self.offset_correction_enabled:
+            signal_data = [v - self.adc_offset for v in signal_data]
+            
+        # Find zero crossings (positive slope only)
+        zero_crossings = []
+        for i in range(1, len(signal_data)):
+            if signal_data[i-1] < 0 and signal_data[i] >= 0:
+                # Use linear interpolation to find the exact zero-crossing time
+                if signal_data[i] != signal_data[i-1]:  # Avoid division by zero
+                    t_ratio = -signal_data[i-1] / (signal_data[i] - signal_data[i-1])
+                    t_zero = self.adc_time_data[i-1] + t_ratio * (self.adc_time_data[i] - self.adc_time_data[i-1])
+                    zero_crossings.append(t_zero)
+        
+        # Calculate frequency from zero crossings
+        if len(zero_crossings) < 2:
+            return 0.0
+            
+        # Calculate average period
+        periods = [zero_crossings[i+1] - zero_crossings[i] for i in range(len(zero_crossings)-1)]
+        if not periods:
+            return 0.0
+            
+        avg_period_ms = sum(periods) / len(periods)
+        frequency = 1000.0 / avg_period_ms  # Convert from ms to Hz
+        
+        return frequency
 
     def handle_gpio_data(self, data):
         # Initialize with safe defaults if no previous data exists
