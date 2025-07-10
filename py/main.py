@@ -120,7 +120,8 @@ class LivePlotter(QWidget):
         self.plot_widget.showGrid(x=True, y=True)
         self.plot_widget.setLabel("left", "Voltage", "V")
         self.plot_widget.setLabel("bottom", "Time", "ms")
-        self.plot_widget.setYRange(-2.0, 2.0)  # Adjusted for centered signal
+        # Initial Y-Range will be updated dynamically based on signal amplitude
+        self.plot_widget.setYRange(-3.5, 3.5)  # Increased range to accommodate larger signals
 
         # Create curves for all signals
         self.adc_curve = self.plot_widget.plot(
@@ -685,15 +686,19 @@ class LivePlotter(QWidget):
                     if hasattr(self, "showing_integrated") and self.showing_integrated:
                         plot_data = self.integrated_adc_data
                     else:
-                        # Apply offset correction if enabled
+                        # Apply offset correction if enabled and double the voltage values to correct scaling
                         if self.offset_correction_enabled:
                             plot_data = [
-                                v - self.adc_offset for v in self.adc_signal_data
+                                (v - self.adc_offset) * 2 for v in self.adc_signal_data  # Multiply by 2 to correct scaling
                             ]
                         else:
-                            plot_data = self.adc_signal_data
+                            plot_data = [v * 2 for v in self.adc_signal_data]  # Multiply by 2 to correct scaling
 
                     self.adc_curve.setData(self.adc_time_data, plot_data)
+
+                    # Dynamically adjust Y-axis range based on signal amplitude
+                    amplitude = max(abs(min(plot_data)), abs(max(plot_data)))
+                    self.plot_widget.setYRange(-amplitude * 1.1, amplitude * 1.1)
 
                 else:
                     print("No ADC data found")
@@ -1344,7 +1349,7 @@ class LivePlotter(QWidget):
 
             # Apply correction immediately
             if not self.showing_integrated:
-                plot_data = [v - self.adc_offset for v in self.adc_signal_data]
+                plot_data = [(v - self.adc_offset) * 2 for v in self.adc_signal_data]  # Multiply by 2 to maintain scaling
                 self.adc_curve.setData(self.adc_time_data, plot_data)
 
             # Show the zero reference line
@@ -1354,7 +1359,8 @@ class LivePlotter(QWidget):
 
             # Remove correction immediately
             if not self.showing_integrated:
-                self.adc_curve.setData(self.adc_time_data, self.adc_signal_data)
+                plot_data = [v * 2 for v in self.adc_signal_data]  # Multiply by 2 to maintain scaling
+                self.adc_curve.setData(self.adc_time_data, plot_data)
 
             # Hide the zero reference line
             self.zero_line.setVisible(False)
@@ -1395,8 +1401,7 @@ class LivePlotter(QWidget):
         # Method 4: Zero-crossing average (finds the values just before zero crossings)
         zero_cross_values = []
         for i in range(1, len(recent_data)):
-            if (recent_data[i-1] < midpoint_offset and recent_data[i] >= midpoint_offset) or \
-               (recent_data[i-1] >= midpoint_offset and recent_data[i] < midpoint_offset):
+            if recent_data[i-1] < 0 and recent_data[i] >= 0:
                 # Average the values around potential zero crossing
                 zero_cross_values.append((recent_data[i-1] + recent_data[i]) / 2)
         
