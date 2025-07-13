@@ -2,7 +2,7 @@ import numpy as np
 
 
 class FrameProcessor:
-    def __init__(self, adc_resolution=12, vref=3.3, sampling_rate_hz=2500):
+    def __init__(self, adc_resolution=12, vref=3.3, sampling_rate_hz=5000):
         self.adc_resolution = adc_resolution
         self.vref = vref
         self.sampling_rate_hz = sampling_rate_hz
@@ -21,8 +21,8 @@ class FrameProcessor:
         for i in range(0, len(packet_bytes), 2):
             raw = int.from_bytes(packet_bytes[i : i + 2], byteorder="little")
             voltage = (raw / (2**self.adc_resolution - 1)) * self.vref
-            # Center around 0V by subtracting 1.65V
-            voltage = voltage - 1.65
+            # Center around 0V by subtracting 1.65V and apply scaling factor of 2
+            voltage = (voltage - 1.65) * 2  # correct probe attenuation
             voltages.append(voltage)
         return np.array(voltages)
 
