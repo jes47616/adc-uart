@@ -686,13 +686,13 @@ class LivePlotter(QWidget):
                     if hasattr(self, "showing_integrated") and self.showing_integrated:
                         plot_data = self.integrated_adc_data
                     else:
-                        # Apply offset correction if enabled
+                        # Apply offset correction if enabled and double the voltage values to correct scaling
                         if self.offset_correction_enabled:
                             plot_data = [
-                                (v - self.adc_offset) for v in self.adc_signal_data  # Scaling already applied in frame.py
+                                (v - self.adc_offset) * 2 for v in self.adc_signal_data  # Multiply by 2 to correct scaling
                             ]
                         else:
-                            plot_data = self.adc_signal_data  # Scaling already applied in frame.py
+                            plot_data = [v * 2 for v in self.adc_signal_data]  # Multiply by 2 to correct scaling
 
                     self.adc_curve.setData(self.adc_time_data, plot_data)
 
@@ -1349,7 +1349,7 @@ class LivePlotter(QWidget):
 
             # Apply correction immediately
             if not self.showing_integrated:
-                plot_data = [(v - self.adc_offset) for v in self.adc_signal_data]  # Scaling already applied in frame.py
+                plot_data = [(v - self.adc_offset) * 2 for v in self.adc_signal_data]  # Multiply by 2 to maintain scaling
                 self.adc_curve.setData(self.adc_time_data, plot_data)
 
             # Show the zero reference line
@@ -1359,7 +1359,7 @@ class LivePlotter(QWidget):
 
             # Remove correction immediately
             if not self.showing_integrated:
-                plot_data = self.adc_signal_data  # Scaling already applied in frame.py
+                plot_data = [v * 2 for v in self.adc_signal_data]  # Multiply by 2 to maintain scaling
                 self.adc_curve.setData(self.adc_time_data, plot_data)
 
             # Hide the zero reference line
@@ -1483,10 +1483,6 @@ class LivePlotter(QWidget):
         avg_period_ms = sum(periods) / len(periods)
         frequency = 1000.0 / avg_period_ms  # Convert from ms to Hz
         
-        # For AC signals, divide by 2 to get the actual frequency (since we're detecting both half-cycles)
-        # This ensures we report the fundamental frequency (e.g., 50Hz instead of 100Hz)
-        frequency = frequency / 2
-
         return frequency
 
     def handle_gpio_data(self, data):
