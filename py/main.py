@@ -3,11 +3,15 @@ import math
 import numpy as np
 from PyQt5.QtWidgets import (
     QApplication,
-    QWidget,
+    QMainWindow,
     QVBoxLayout,
     QHBoxLayout,
+    QWidget,
     QPushButton,
+    QTextEdit,
     QComboBox,
+    QLabel,
+    QDoubleSpinBox,
 )
 from PyQt5.QtWidgets import QTextEdit
 from PyQt5.QtCore import Qt
@@ -188,6 +192,28 @@ class LivePlotter(QWidget):
         self.offset_correction_enabled = False
         self.adc_offset = 0.0  # Store calculated offset value
         self.offset_window_size = 500  # Number of samples to use for offset calculation
+        
+        # Add calibration factor input
+        self.calibration_factor = 2.5  # Default calibration factor in kA/V
+        
+        # Create a horizontal layout for calibration controls
+        calibration_layout = QHBoxLayout()
+        self.calibration_label = QLabel("Calibration Factor (kA/V):")
+        self.calibration_label.setStyleSheet("color: #333; font-weight: bold;")
+        self.calibration_input = QDoubleSpinBox()
+        self.calibration_input.setRange(0.1, 10.0)  # Reasonable range for calibration
+        self.calibration_input.setSingleStep(0.1)    # Step size
+        self.calibration_input.setValue(2.5)         # Default value
+        self.calibration_input.setDecimals(2)        # Show 2 decimal places
+        self.calibration_input.valueChanged.connect(self.update_calibration_factor)  # Connect to update method
+        
+        # Initialize the calibration factor attribute
+        self.calibration_factor = 2.5
+        
+        # Add the label and spin box to the calibration layout
+        calibration_layout.addWidget(self.calibration_label)
+        calibration_layout.addWidget(self.calibration_input)
+        calibration_layout.addStretch(1)  # Add stretch to push controls to the left
 
         self.start_btn.clicked.connect(self.start_plotting)
         self.stop_btn.clicked.connect(self.stop_plotting)
@@ -219,17 +245,17 @@ class LivePlotter(QWidget):
         # Left widget for hex data
         self.log_output = QTextEdit()
         self.log_output.setReadOnly(True)
-        self.log_output.setMinimumHeight(150)
+        self.log_output.setMinimumHeight(120)  # Reduced by 20% from 150 to 120
 
         # Middle widget for system information
         self.system_info_widget = QTextEdit()
         self.system_info_widget.setReadOnly(True)
-        self.system_info_widget.setMinimumHeight(150)
+        self.system_info_widget.setMinimumHeight(120)  # Reduced by 20% from 150 to 120
 
         # Right widget for phase angle analysis
         self.phase_angle_widget = QTextEdit()
         self.phase_angle_widget.setReadOnly(True)
-        self.phase_angle_widget.setMinimumHeight(150)
+        self.phase_angle_widget.setMinimumHeight(120)  # Reduced by 20% from 150 to 120
 
         # Create bottom layout to hold the three widgets
         bottom_layout = QHBoxLayout()
@@ -239,11 +265,376 @@ class LivePlotter(QWidget):
 
         # Add widgets to main layout
         main_layout.addLayout(controls_layout)
+        main_layout.addLayout(calibration_layout)  # Add the calibration controls
         main_layout.addLayout(overview_layout)
         main_layout.addWidget(self.plot_widget, 1)  # Plot gets stretch factor of 1
         main_layout.addLayout(
             bottom_layout, 1
         )  # Bottom layout gets equal stretch factor of 1
+
+    def toggle_signal_view(self):
+        """Toggle between raw ADC signal and integrated current signal"""
+        self.showing_integrated = not self.showing_integrated
+
+        if self.showing_integrated:
+            # Show integrated signal alongside raw signal
+            self.integrated_adc_data = self.integrate_adc_signal()
+            self.integrated_curve.setData(self.adc_time_data, self.integrated_adc_data)
+            self.integrated_curve.setVisible(True)
+            
+            # Show the right axis with current in kA
+            self.plot_widget.getAxis('right').setLabel('Current', 'kA')
+            self.plot_widget.showAxis('right')
+            
+            # Update button text
+            self.signal_toggle_btn.setText("Hide Current (kA)")
+            
+            # Update the zero-crossing detection and phase angle analysis with the integrated data
+            self.process_arc_analysis()
+        else:
+            # Hide integrated signal but keep raw signal visible
+            self.integrated_curve.setVisible(False)
+            
+            # Hide the right axis if it exists
+            if hasattr(self, 'right_axis'):
+                self.plot_widget.showAxis('right', False)
+            
+            # Update button text
+            self.signal_toggle_btn.setText("Show Current (kA)")
+            
+            # Switch back to raw signal
+            if self.offset_correction_enabled:
+                plot_data = [(v - self.adc_offset) * 2 for v in self.adc_signal_data]  # Apply offset correction and scaling
+            else:
+                plot_data = [v * 2 for v in self.adc_signal_data]  # Just apply scaling
+            self.adc_curve.setData(self.adc_time_data, plot_data)
+            self.plot_widget.setLabel('left', 'Voltage', units='V')
+        
+        # Update the signal widget
+        self.update_signal_widget()
+
+    def toggle_offset_correction(self):
+        """Toggle offset correction for the ADC signal"""
+        self.offset_correction_enabled = not self.offset_correction_enabled
+
+        if self.offset_correction_enabled:
+            self.offset_correction_btn.setText("Remove Offset Correction")
+            self.calculate_adc_offset()
+
+            # Apply correction immediately
+            if not self.showing_integrated:
+                plot_data = [(v - self.adc_offset) * 2 for v in self.adc_signal_data]  # Multiply by 2 to maintain scaling
+                self.adc_curve.setData(self.adc_time_data, plot_data)
+
+            # Show the zero reference line
+            self.zero_line.setVisible(True)
+        else:
+            self.offset_correction_btn.setText("Apply Offset Correction")
+
+            # Remove correction immediately
+            if not self.showing_integrated:
+                plot_data = [v * 2 for v in self.adc_signal_data]  # Multiply by 2 to maintain scaling
+                self.adc_curve.setData(self.adc_time_data, plot_data)
+
+            # Hide the zero reference line
+            self.zero_line.setVisible(False)
+
+        # Update the signal widget to show offset value
+        self.update_signal_widget()
+        
+    def update_calibration_factor(self, new_value):
+        """Update the calibration factor for the Rogowski coil"""
+        # Store the new calibration factor
+        self.calibration_factor = new_value
+        
+        # Recalculate the integrated signal with the new calibration factor
+        if self.adc_time_data and self.adc_signal_data:
+            self.integrated_adc_data = self.integrate_adc_signal()
+            
+            # Update the plot if we're showing the integrated signal
+            if self.showing_integrated:
+                self.integrated_curve.setData(self.adc_time_data, self.integrated_adc_data)
+            
+            # Update the phase angle analysis to reflect the new calibration
+            self.process_arc_analysis()
+            
+        # Log the calibration change
+        self.log_output.append(f"<span style='color:#0066cc;'>Calibration factor updated to {new_value:.2f} kA/V</span>")
+        self.log_output.verticalScrollBar().setValue(self.log_output.verticalScrollBar().maximum())
+
+    def calculate_signal_amplitude(self):
+        """
+        Calculate the actual amplitude of the ADC signal.
+        Returns the peak-to-peak amplitude in volts.
+        """
+        if not self.adc_signal_data or len(self.adc_signal_data) < 10:
+            return 0.0
+            
+        # Apply offset correction if enabled
+        signal_data = self.adc_signal_data
+        if self.offset_correction_enabled:
+            signal_data = [v - self.adc_offset for v in signal_data]
+            
+        # Calculate peak-to-peak amplitude
+        max_val = max(signal_data)
+        min_val = min(signal_data)
+        amplitude = max_val - min_val
+        
+        return amplitude
+        
+    def calculate_signal_frequency(self):
+        """
+        Calculate the actual frequency of the ADC signal using zero-crossing method.
+        Returns the frequency in Hz.
+        """
+        if not self.adc_signal_data or len(self.adc_signal_data) < 100:
+            return 0.0
+            
+        # Apply offset correction if enabled
+        signal_data = self.adc_signal_data
+        if self.offset_correction_enabled:
+            signal_data = [v - self.adc_offset for v in signal_data]
+            
+        # Find zero crossings (positive slope only)
+        zero_crossings = []
+        for i in range(1, len(signal_data)):
+            if signal_data[i-1] < 0 and signal_data[i] >= 0:
+                # Use linear interpolation to find the exact zero-crossing time
+                if signal_data[i] != signal_data[i-1]:  # Avoid division by zero
+                    t_ratio = -signal_data[i-1] / (signal_data[i] - signal_data[i-1])
+                    t_zero = self.adc_time_data[i-1] + t_ratio * (self.adc_time_data[i] - self.adc_time_data[i-1])
+                    zero_crossings.append(t_zero)
+        
+        # Calculate frequency from zero crossings
+        if len(zero_crossings) < 2:
+            return 0.0
+            
+        # Calculate average period
+        periods = [zero_crossings[i+1] - zero_crossings[i] for i in range(len(zero_crossings)-1)]
+        if not periods:
+            return 0.0
+            
+        avg_period_ms = sum(periods) / len(periods)
+        
+        # Since we're detecting positive-slope zero-crossings, we're only seeing
+        # half-cycles of the fundamental frequency. Divide by 2 to get the true frequency.
+        frequency = (1000.0 / avg_period_ms) / 2.0  # Convert from ms to Hz and adjust for half-cycles
+        
+        return frequency
+        
+    def calculate_adc_offset(self):
+        """Calculate the DC offset of the ADC signal using multiple methods for robustness"""
+        if not self.adc_signal_data or len(self.adc_signal_data) < 10:
+            return
+
+        # Use the most recent data for offset calculation
+        recent_data = self.adc_signal_data[-self.offset_window_size:] if len(self.adc_signal_data) > self.offset_window_size else self.adc_signal_data
+        if not recent_data:
+            return
+
+        # Method 1: Standard min-max midpoint
+        min_val = min(recent_data)
+        max_val = max(recent_data)
+        midpoint_offset = (min_val + max_val) / 2
+
+        # Method 2: Mean value (works better for asymmetrical waveforms)
+        mean_offset = sum(recent_data) / len(recent_data)
+
+        # Method 3: Median (robust against outliers)
+        sorted_data = sorted(recent_data)
+        median_offset = sorted_data[len(sorted_data) // 2]
+
+        # Method 4: Zero-crossing average (finds the values just before zero crossings)
+        zero_cross_values = []
+        for i in range(1, len(recent_data)):
+            if recent_data[i-1] < 0 and recent_data[i] >= 0:
+                # Average the values around potential zero crossing
+                zero_cross_values.append((recent_data[i-1] + recent_data[i]) / 2)
+        
+        zero_crossing_offset = sum(zero_cross_values) / len(zero_cross_values) if zero_cross_values else midpoint_offset
+
+        # Weighted combination of all methods for robust offset calculation
+        # For sine waves, mean and median should be very close to the true offset
+        # If they differ, we likely have an asymmetrical or distorted waveform
+        if abs(mean_offset - median_offset) < 0.1:  # Small difference indicates symmetrical signal
+            self.adc_offset = (mean_offset * 0.5) + (midpoint_offset * 0.3) + (zero_crossing_offset * 0.2)
+        else:  # Larger difference suggests asymmetry
+            # For asymmetrical signals, the median and zero-crossing methods often work better
+            self.adc_offset = (median_offset * 0.4) + (zero_crossing_offset * 0.4) + (mean_offset * 0.2)
+
+        # Apply a small amount of smoothing with previous offset (if it exists)
+        if hasattr(self, 'prev_adc_offset'):
+            self.adc_offset = 0.8 * self.adc_offset + 0.2 * self.prev_adc_offset
+        
+        # Store current offset for future smoothing
+        self.prev_adc_offset = self.adc_offset
+
+        print(
+            f"Calculated ADC offset: {self.adc_offset:.4f} V "
+            f"(min: {min_val:.4f}, max: {max_val:.4f}, mean: {mean_offset:.4f}, median: {median_offset:.4f})"
+        )
+        
+    def handle_gpio_data(self, data):
+        # Initialize with safe defaults if no previous data exists
+        timestamps = [self.gpio_time_data[-1]] if self.gpio_time_data else [0.0]
+        display_levels = [self.gpio_signal_data[-1]] if self.gpio_signal_data else [0.0]
+        binary_levels = [
+            1 if display_levels[0] > 0 else 0
+        ]  # Binary version for analysis
+
+        for i in range(0, len(data), 5):
+            ts_ms = int.from_bytes(data[i : i + 4], byteorder="little") * 2 / 1000.0
+            if ts_ms == 0:
+                continue
+
+            # Get the binary level (0 or 1)
+            is_high = bool(data[i + 4])
+
+            # For display: use 0 for LOW and 0.5 for HIGH
+            display_level = 0 if not is_high else 0.5
+
+            # For analysis: use binary 0/1
+            binary_level = 0 if not is_high else 1
+
+            # Draw a vertical edge only if level changed (for display)
+            if display_levels[-1] != display_level:
+                timestamps.append(ts_ms)
+                display_levels.append(display_levels[-1])  # Previous level
+                binary_levels.append(binary_levels[-1])  # Previous binary level
+
+            # Add the new point
+            timestamps.append(ts_ms)
+            display_levels.append(display_level)
+            binary_levels.append(binary_level)
+
+        # Skip the first point which was just for continuity
+        return timestamps[1:], display_levels[1:], binary_levels[1:]
+        
+    def update_plot_markers(self, t_start, raw_end_time, t_end, voltage_zero_crossings, current_zero_crossings):
+        """
+        Add markers to the plot for important timestamps and zero-crossings
+        All markers are placed at y=0 for clarity
+        """
+        # Remove any existing marker items from previous calls
+        if hasattr(self, 'marker_items') and self.marker_items:
+            for item in self.marker_items:
+                self.plot_widget.removeItem(item)
+        
+        # Initialize the list to store marker items
+        self.marker_items = []
+        
+        # Create scatter plot items for each marker type
+        start_marker = pg.ScatterPlotItem()
+        raw_end_marker = pg.ScatterPlotItem()
+        end_marker = pg.ScatterPlotItem()
+        voltage_zc_marker = pg.ScatterPlotItem()
+        current_zc_marker = pg.ScatterPlotItem()
+        
+        # Add the markers to the plot and to our tracking list
+        self.plot_widget.addItem(start_marker)
+        self.plot_widget.addItem(raw_end_marker)
+        self.plot_widget.addItem(end_marker)
+        self.plot_widget.addItem(voltage_zc_marker)
+        self.plot_widget.addItem(current_zc_marker)
+        
+        # Store references to all marker items
+        self.marker_items = [start_marker, raw_end_marker, end_marker, voltage_zc_marker, current_zc_marker]
+        
+        # Add Arc Start Time marker (green)
+        if t_start is not None:
+            start_marker.addPoints([{'pos': (t_start, 0), 'size': 6, 'pen': pg.mkPen(color='#4CAF50', width=1), 'brush': pg.mkBrush(color='#4CAF50'), 'symbol': 'o'}])
+        
+        # Add Raw End Time marker (orange)
+        if raw_end_time is not None:
+            raw_end_marker.addPoints([{'pos': (raw_end_time, 0), 'size': 6, 'pen': pg.mkPen(color='#FF9800', width=1), 'brush': pg.mkBrush(color='#FF9800'), 'symbol': 'o'}])
+        
+        # Add Corrected End Time marker (red)
+        if t_end is not None:
+            end_marker.addPoints([{'pos': (t_end, 0), 'size': 6, 'pen': pg.mkPen(color='#F44336', width=1), 'brush': pg.mkBrush(color='#F44336'), 'symbol': 'o'}])
+        
+        # Add Voltage Zero-Crossing markers (purple)
+        if voltage_zero_crossings:
+            points = [{'pos': (t, 0), 'size': 6, 'pen': pg.mkPen(color='#9C27B0', width=1), 'brush': pg.mkBrush(color='#9C27B0'), 'symbol': 'o'} for t in voltage_zero_crossings]
+            voltage_zc_marker.addPoints(points)
+        
+        # Add Current Zero-Crossing markers (cyan)
+        if current_zero_crossings:
+            points = [{'pos': (t, 0), 'size': 6, 'pen': pg.mkPen(color='#00BCD4', width=1), 'brush': pg.mkBrush(color='#00BCD4'), 'symbol': 'o'} for t in current_zero_crossings]
+            current_zc_marker.addPoints(points)
+            
+    def update_phase_angle_display(self, voltage_zero_crossings, current_zero_crossings):
+        """
+        Update the phase angle analysis display with comprehensive phase information
+        and consistent styling with other analysis sections
+        """
+        if not voltage_zero_crossings or not current_zero_crossings:
+            self.phase_angle_widget.setText("<p style='color:#999'>No zero-crossing data available for phase analysis</p>")
+            return
+            
+        # Clear previous content
+        self.phase_angle_widget.clear()
+        
+        # Add header with consistent styling (matching Arc Analysis and Zero Crossing)
+        self.phase_angle_widget.append("<h4 style='margin: 3px 0; color: #673AB7;'>Phase Angle Analysis</h4>")
+        
+        # Calculate phase angles between voltage and current zero-crossings
+        phase_angles = []
+        phase_details = []
+        
+        for v_zc in voltage_zero_crossings:
+            # Find the closest current zero-crossing after this voltage zero-crossing
+            closest_c_zc = None
+            min_diff = float('inf')
+            
+            for c_zc in current_zero_crossings:
+                if c_zc > v_zc:  # Only consider current zero-crossings that come after voltage
+                    diff = c_zc - v_zc
+                    if diff < min_diff:
+                        min_diff = diff
+                        closest_c_zc = c_zc
+            
+            if closest_c_zc is not None:
+                # Calculate phase angle in degrees
+                # Assuming 50Hz or 60Hz, one cycle is 20ms or 16.67ms
+                # We'll use the frequency from the signal if available
+                if hasattr(self, 'signal_frequency') and self.signal_frequency > 0:
+                    cycle_time = 1000.0 / self.signal_frequency  # in ms
+                else:
+                    # Default to 50Hz if frequency not available
+                    cycle_time = 20.0  # ms (for 50Hz)
+                
+                time_diff = closest_c_zc - v_zc  # in ms
+                phase_angle = (time_diff / cycle_time) * 360.0  # in degrees
+                
+                # Ensure phase angle is within 0-90 degrees (typical for power systems)
+                if phase_angle > 90:
+                    phase_angle = phase_angle % 90
+                
+                phase_angles.append(phase_angle)
+                phase_details.append((v_zc, closest_c_zc, phase_angle))
+        
+        # Calculate statistics if we have phase angles
+        if phase_angles:
+            min_phase = min(phase_angles)
+            max_phase = max(phase_angles)
+            mean_phase = sum(phase_angles) / len(phase_angles)
+            
+            # Determine if circuit is capacitive or inductive
+            # In AC circuits, current leads voltage in capacitive circuits (negative phase angle)
+            # Current lags voltage in inductive circuits (positive phase angle)
+            circuit_type = "Inductive" if mean_phase > 0 else "Capacitive"
+            power_factor = abs(math.cos(math.radians(mean_phase)))
+            
+            # Add phase angle statistics with compact styling
+            self.phase_angle_widget.append(f"<p style='margin: 4px 0;'><b>Circuit Type:</b> {circuit_type} (PF = {power_factor:.3f})</p>")
+            self.phase_angle_widget.append(f"<p style='margin: 4px 0;'><b>Phase Angles:</b> Min = {min_phase:.1f}°, Max = {max_phase:.1f}°, Mean = {mean_phase:.1f}°</p>")
+            
+            # Add a separator
+            self.phase_angle_widget.append("<hr style='margin: 4px 0; border: 0; border-top: 1px solid #ddd;'>")
+            
+            # Add individual phase angle measurements with compact styling
+            for v_zc, c_zc, angle in phase_details:
+                self.phase_angle_widget.append(f"<p style='margin: 2px 0;'>• Current @ <b>{c_zc:.3f}</b> ms — Voltage @ <b>{v_zc:.3f}</b> ms ⇒ Φ = <b>{angle:.1f}°</b></p>")
 
     def update_system_widget(self):
         """Update the system overview widget"""
@@ -541,10 +932,15 @@ class LivePlotter(QWidget):
                     integrated[i] - moving_avg[i] for i in range(len(integrated))
                 ]
 
-        # Apply calibration factor of 2.5kA/V for the Rogowski coil
+        # Apply calibration factor for the Rogowski coil
         # This converts the integrated signal from Volts to Kiloamperes
-        calibration_factor = 2.5  # 2.5 Kiloamperes per Volt (2500A/V ÷ 1000)
-        integrated = [val * calibration_factor for val in integrated]
+        # Default is 2.5 kA/V but can be adjusted through the UI
+        if not hasattr(self, 'calibration_factor'):
+            self.calibration_factor = 2.5  # 2.5 Kiloamperes per Volt (2500A/V ÷ 1000)
+            
+        # With 5000Hz sampling rate we need to use the calibration factor without adjustment
+        # (previous scaling factor of 0.5 was causing values to be too small)
+        integrated = [val * self.calibration_factor for val in integrated]
 
         return integrated
 
@@ -1084,37 +1480,30 @@ class LivePlotter(QWidget):
                 )
         # Clear previous content
         self.system_info_widget.clear()
-
+        
         # Add title with styling
         self.system_info_widget.append('<h3 style="color: #4285f4; margin-bottom: 10px;">Arc Analysis</h3>')
-
-        # Arc timing information
-        if t_start is not None:
-            self.system_info_widget.append(f'<span style="color: #4CAF50;"><b>Arc Start Time:</b> {t_start:.3f} ms</span>')
-        else:
-            self.system_info_widget.append('<span style="color: #4CAF50;"><b>Arc Start Time:</b> Not detected</span>')
-
-        if raw_end_time is not None:
-            self.system_info_widget.append(
-                f'<span style="color: #FF9800;"><b>Raw End Time:</b> {raw_end_time:.3f} ms</span>'
-            )
-        else:
-            self.system_info_widget.append('<span style="color: #FF9800;"><b>Raw End Time:</b> Not detected</span>')
-
-        if pulse_pair_duration is not None:
-            self.system_info_widget.append(
-                f'<span style="color: #9C27B0;"><b>Pulse Pair Duration:</b> {pulse_pair_duration:.3f} ms</span>'
-            )
-
-        if t_end is not None:
-            self.system_info_widget.append(f'<span style="color: #F44336;"><b>Corrected End Time:</b> {t_end:.3f} ms</span>')
-        else:
-            self.system_info_widget.append('<span style="color: #F44336;"><b>Corrected End Time:</b> Not detected</span>')
-
-        if t_arc is not None:
-            self.system_info_widget.append(f'<span style="color: #2196F3;"><b>Arc Duration:</b> {t_arc:.3f} ms</span>')
-        else:
-            self.system_info_widget.append('<span style="color: #2196F3;"><b>Arc Duration:</b> Not detected</span>')
+        
+        # Arc timing information - Display in a more organized layout
+        # Row 1: Arc Start Time and Raw End Time on the same line
+        start_time_text = f'{t_start:.3f} ms' if t_start is not None else 'Not detected'
+        end_time_text = f'{raw_end_time:.3f} ms' if raw_end_time is not None else 'Not detected'
+        self.system_info_widget.append(
+            f'<span style="color: #4CAF50;"><b>Arc Start Time:</b> {start_time_text}</span> | '
+            f'<span style="color: #FF9800;"><b>Raw End Time:</b> {end_time_text}</span>'
+        )
+        
+        # Row 2: Pulse Pair Duration and Corrected End Time on the same line
+        pulse_pair_text = f'{pulse_pair_duration:.3f} ms' if pulse_pair_duration is not None else 'Not detected'
+        corrected_end_text = f'{t_end:.3f} ms' if t_end is not None else 'Not detected'
+        self.system_info_widget.append(
+            f'<span style="color: #000000;"><b>Pulse Pair Duration:</b> {pulse_pair_text}</span> | '
+            f'<span style="color: #F44336;"><b>Corrected End Time:</b> {corrected_end_text}</span>'
+        )
+        
+        # Row 3: Arc Duration on its own line
+        arc_duration_text = f'{t_arc:.3f} ms' if t_arc is not None else 'Not detected'
+        self.system_info_widget.append(f'<span style="color: #2196F3;"><b>Arc Duration:</b> {arc_duration_text}</span>')
 
         # Add voltage zero-crossing information
         # Include corrected end time as the first voltage zero-crossing
@@ -1127,71 +1516,144 @@ class LivePlotter(QWidget):
             voltage_zero_crossings
         )  # Add the rest of the zero-crossings
 
-        self.system_info_widget.append('<h3 style="color: #FF5722; margin-top: 15px;">Voltage Zero-Crossings</h3>')
+        # Add a header for zero crossing detection
+        self.system_info_widget.append('<h3 style="color: #2196F3; margin-top: 15px;">Zero Crossing Detection</h3>')
+        
+        # Create a table for voltage and current zero-crossings
+        table_html = '''
+        <table style="width: 100%; border-collapse: collapse;">
+            <tr>
+                <th style="text-align: left; padding: 5px; color: #9C27B0; width: 45%;">Voltage Zero-Crossings</th>
+                <th style="text-align: left; padding: 5px; color: #00BCD4; width: 45%;">Current Zero-Crossings</th>
+            </tr>
+        '''
+        
+        # Determine how many rows to show
+        max_voltage = len(all_voltage_crossings)
+        max_current = min(len(current_zero_crossings), 10)  # Limit to 10 current zero-crossings
+        max_rows = max(max_voltage, max_current)
+        
+        # Generate table rows
+        for i in range(max_rows):
+            voltage_text = f"{all_voltage_crossings[i]:.3f}" if i < max_voltage else ""
+            current_text = f"{current_zero_crossings[i]:.3f}" if i < max_current else ""
+            
+            table_html += f'''
+            <tr>
+                <td style="text-align: left; padding: 5px; color: #9C27B0; padding-right: 20px;">{voltage_text}</td>
+                <td style="text-align: left; padding: 5px; color: #00BCD4;">{current_text}</td>
+            </tr>
+            '''
+        
+        # Close the table
+        table_html += '</table>'
+        
+        # Add the table to the widget
+        self.system_info_widget.append(table_html)
+        
+        # Add note if there are more current zero-crossings
+        if len(current_zero_crossings) > 10:
+            self.system_info_widget.append(
+                f"<span style=\"color: #00BCD4; font-style: italic;\">... and {len(current_zero_crossings) - 10} more current zero-crossings</span>"
+            )
 
-        if all_voltage_crossings:
-            for i, zc in enumerate(all_voltage_crossings):
-                self.system_info_widget.append(f"  {i+1}. {zc:.3f}")
-
-        # Add current zero-crossing information
-        self.system_info_widget.append('<h4 style="color: #00BCD4; margin-top: 10px;">Current Zero-Crossings</h4>')
-
-        if current_zero_crossings:
-            for i, zc in enumerate(current_zero_crossings[:10]):  # Show first 10 only
-                self.system_info_widget.append(f"  {i+1}. {zc:.3f}")
-            if len(current_zero_crossings) > 10:
-                self.system_info_widget.append(
-                    f"  ... and {len(current_zero_crossings) - 10} more"
-                )
-
+        # Add markers to the plot for important timestamps and zero-crossings
+        self.update_plot_markers(t_start, raw_end_time, t_end, voltage_zero_crossings, current_zero_crossings)
+        
         # Calculate phase angle between voltage and current
         self.update_phase_angle_display(all_voltage_crossings, current_zero_crossings)
 
-    def update_phase_angle_display(
-        self, voltage_zero_crossings, current_zero_crossings
-    ):
-        """
-        Calculate and display the phase angle between voltage and current zero-crossings.
-        Skips the first zero-crossing of each signal type and starts from the second crossing.
-
-        Args:
-            voltage_zero_crossings: List of voltage zero-crossing timestamps in ms
-            current_zero_crossings: List of current zero-crossing timestamps in ms
-        """
-        # Create a new widget for phase angle display if it doesn't exist
-        if not hasattr(self, "phase_angle_widget"):
-            self.phase_angle_widget = QTextEdit()
-            self.phase_angle_widget.setReadOnly(True)
-            self.right_layout.addWidget(self.phase_angle_widget)
-
-        # Add a title at the top of the widget
-        self.phase_angle_widget.clear()
-        self.phase_angle_widget.append(
-            '<h3 style="color: #4285f4; margin-top: 0;">⚡ Phase Angle Analysis ⚡</h3>'
-        )
-
-        # Add a note about which signal is being used for current zero-crossing detection
-        signal_type = (
-            "Integrated Current"
-            if hasattr(self, "showing_integrated") and self.showing_integrated
-            else "Raw dI/dt"
-        )
-        self.phase_angle_widget.append(
-            f'<p style="color: #4CAF50;"><b>Signal used:</b> {signal_type}</p>'
-        )
-
-        # Check if we have both voltage and current zero-crossings
-        # Now we need at least 2 crossings of each type to proceed (since we're skipping the first ones)
-        if len(voltage_zero_crossings) < 2 or len(current_zero_crossings) < 2:
-            html_content = """
-            <div style="text-align: center; padding: 20px; color: #757575;">
-                <p>⚠️ Insufficient zero-crossings detected ⚠️</p>
-                <p>Need at least 2 voltage and 2 current zero-crossings to calculate phase angle.</p>
-            </div>
-            """
-            self.phase_angle_widget.setHtml(html_content)
-            return
-
+def update_plot_markers(self, t_start, raw_end_time, t_end, voltage_zero_crossings, current_zero_crossings):
+    """
+    Add markers to the plot for important timestamps and zero-crossings
+    All markers are placed at y=0 for clarity
+    """
+    # Clear any existing markers
+    if hasattr(self, 'markers'):
+        for marker in self.markers:
+            self.plot_widget.removeItem(marker)
+    
+    self.markers = []
+    
+    # Add Arc Start Time marker (green) at y=0
+    if t_start is not None:
+        start_marker = pg.ScatterPlotItem()
+        start_marker.addPoints([{'pos': (t_start, 0), 'size': 6, 'pen': {'color': 'g', 'width': 1}, 
+                                'brush': pg.mkBrush(color='#4CAF50'), 'symbol': 'o'}])
+        self.plot_widget.addItem(start_marker)
+        self.markers.append(start_marker)
+    
+    # Add Raw End Time marker (orange) at y=0
+    if raw_end_time is not None:
+        raw_end_marker = pg.ScatterPlotItem()
+        raw_end_marker.addPoints([{'pos': (raw_end_time, 0), 'size': 6, 'pen': {'color': 'orange', 'width': 1}, 
+                                  'brush': pg.mkBrush(color='#FF9800'), 'symbol': 'o'}])
+        self.plot_widget.addItem(raw_end_marker)
+        self.markers.append(raw_end_marker)
+    
+    # Add Corrected End Time marker (red) at y=0
+    if t_end is not None:
+        end_marker = pg.ScatterPlotItem()
+        end_marker.addPoints([{'pos': (t_end, 0), 'size': 6, 'pen': {'color': 'r', 'width': 1}, 
+                              'brush': pg.mkBrush(color='#F44336'), 'symbol': 'o'}])
+        self.plot_widget.addItem(end_marker)
+        self.markers.append(end_marker)
+    
+    # Add Voltage Zero-Crossings (smaller purple markers) at y=0
+    if voltage_zero_crossings:
+        voltage_markers = pg.ScatterPlotItem()
+        points = []
+        for zc in voltage_zero_crossings:
+            points.append({'pos': (zc, 0), 'size': 6, 'pen': {'color': '#9C27B0', 'width': 1}, 
+                          'brush': pg.mkBrush(color='#9C27B0'), 'symbol': 'o'})
+        voltage_markers.addPoints(points)
+        self.plot_widget.addItem(voltage_markers)
+        self.markers.append(voltage_markers)
+    
+    # Add Current Zero-Crossings (smaller cyan markers) at y=0
+    if current_zero_crossings:
+        current_markers = pg.ScatterPlotItem()
+        points = []
+        for zc in current_zero_crossings[:10]:  # Limit to first 10
+            points.append({'pos': (zc, 0), 'size': 6, 'pen': {'color': '#00BCD4', 'width': 1}, 
+                          'brush': pg.mkBrush(color='#00BCD4'), 'symbol': 'o'})
+        current_markers.addPoints(points)
+        self.plot_widget.addItem(current_markers)
+        self.markers.append(current_markers)
+    
+def update_phase_angle_display(
+    self, voltage_zero_crossings, current_zero_crossings
+):
+    """
+    Calculate and display the phase angle between voltage and current signals
+    with detailed current analysis information
+    """
+    if not voltage_zero_crossings or not current_zero_crossings:
+        return
+        
+    # Clear the phase angle widget before adding new content
+    self.phase_angle_widget.clear()
+    
+    # Add a styled header for the phase angle analysis
+    self.phase_angle_widget.append(
+        "<h3 style='margin-top:0; color:#4285f4;'>Phase & Current Analysis</h3>"
+    )
+    
+    # Find the closest voltage zero-crossing to each current zero-crossing
+    phase_angles = []
+    for current_zc in current_zero_crossings:
+        closest_voltage_zc = min(voltage_zero_crossings, key=lambda x: abs(x - current_zc))
+        time_diff = current_zc - closest_voltage_zc  # Time difference in ms
+        
+        # Calculate phase angle (assuming 50Hz frequency = 20ms period)
+        # 360 degrees = 20ms, so 1ms = 18 degrees
+        phase_angle = (time_diff / 20.0) * 360.0
+        
+        # Normalize to -180 to +180 degrees
+        while phase_angle > 180:
+            phase_angle -= 360
+        while phase_angle < -180:
+            phase_angle += 360
         # Skip the first zero-crossing for both voltage and current signals
         # Use zero-crossings starting from the second one (index 1)
         voltage_zero_crossings = voltage_zero_crossings[1:]
@@ -1232,7 +1694,7 @@ class LivePlotter(QWidget):
 
             if closest_c_zc is not None:
                 # Calculate phase angle
-                time_diff_ms = closest_c_zc - v_zc
+                time_diff_ms = closest_c_zc - v_zc  # in ms
                 
                 # Normalize the time difference if it exceeds half a period
                 # This accounts for cases where the closest crossing is in the next or previous cycle
@@ -1248,9 +1710,9 @@ class LivePlotter(QWidget):
                 # Determine if current leads or lags voltage
                 direction = "→" if phase_angle > 0 else "←"
 
-                # Display the pair and calculation
+                # Display the pair and calculation in a compact format
                 self.phase_angle_widget.append(
-                    f"• Current @ <b>{closest_c_zc:.3f}</b> ms — Voltage @ <b>{v_zc:.3f}</b> ms ⇒ Φ = <b>{phase_angle:.1f}°</b>"
+                    f"<p style='margin: 2px 0;'>• Current @ <b>{closest_c_zc:.3f}</b> ms — Voltage @ <b>{v_zc:.3f}</b> ms ⇒ Φ = <b>{phase_angle:.1f}°</b></p>"
                 )
                 pairs_analyzed += 1
 
@@ -1260,16 +1722,12 @@ class LivePlotter(QWidget):
             min_phase = min(phase_angles)
             max_phase = max(phase_angles)
 
-            # Display statistics with color coding
-            self.phase_angle_widget.append("<br>")
+            # Display statistics with color coding in a compact format
             self.phase_angle_widget.append(
-                f"<span style='color:#4CAF50;'>📊 Mean Phase Angle: <b>{mean_phase:.1f}°</b></span>"
+                f"<p style='margin: 5px 0 2px 0;'><span style='color:#4CAF50;'>📊 Mean Phase Angle: <b>{mean_phase:.1f}°</b></span></p>"
             )
             self.phase_angle_widget.append(
-                f"<span style='color:#2196F3;'>📉 Min: <b>{min_phase:.1f}°</b>, 📈 Max: <b>{max_phase:.1f}°</b></span>"
-            )
-            self.phase_angle_widget.append(
-                f"<span style='color:#FFC107;'>🔍 Pairs Analyzed: <b>{pairs_analyzed}</b></span>"
+                f"<p style='margin: 2px 0;'><span style='color:#2196F3;'>📉 Min: <b>{min_phase:.1f}°</b>, 📈 Max: <b>{max_phase:.1f}°</b> | <span style='color:#FFC107;'>🔍 Pairs: <b>{pairs_analyzed}</b></span></span></p>"
             )
 
             # Calculate power factor based on mean phase angle
@@ -1286,28 +1744,88 @@ class LivePlotter(QWidget):
                 load_type = "Inductive"
                 color = "#FF9800"
 
-            # Add a legend
-            self.phase_angle_widget.append("<br>")
-            self.phase_angle_widget.append("<b>Legend:</b>")
+            # Add a legend in a compact format
             self.phase_angle_widget.append(
-                "<span style='color:#FFC107;'>⚡: Current</span>, <span style='color:#2196F3;'>⚡: Voltage</span>, <span style='color:#4CAF50;'>⊕: Zero-Crossing</span>, <span style='color:#FF5722;'>🔥: Arc</span>, <span style='color:#9C27B0;'>Φ: Phase</span>, <span style='color:#795548;'>⏱: Duration</span>"
+                "<p style='margin: 5px 0 2px 0;'><b>Legend:</b> "
+                "<span style='color:#FFC107;'>⚡: Current</span> | "
+                "<span style='color:#2196F3;'>⚡: Voltage</span> | "
+                "<span style='color:#9C27B0;'>⊕: Zero-Crossing</span> | "
+                "<span style='color:#FF5722;'>🔥: Arc</span> | "
+                "<span style='color:#000000;'>⏱: Duration</span></p>"
             )
 
-            # Add detailed insights
-            self.phase_angle_widget.append("<br>")
-            self.phase_angle_widget.append("<h4>Circuit Analysis</h4>")
+            # Calculate current signal metrics
+            signal_amplitude = self.calculate_signal_amplitude()
+            
+            # Calculate effective value (RMS) of the current
+            # For a sinusoidal waveform, RMS = Amplitude / sqrt(2)
+            if self.integrated_adc_data and len(self.integrated_adc_data) > 10:
+                current_peak = max(abs(min(self.integrated_adc_data)), abs(max(self.integrated_adc_data)))
+                current_rms = current_peak / math.sqrt(2)
+            else:
+                current_peak = 0
+                current_rms = 0
+                
+            # Add detailed insights with improved styling
+            self.phase_angle_widget.append("<div style='margin-top:10px; padding:8px; background-color:#f5f5f5; border-radius:4px;'>")
+            self.phase_angle_widget.append("<h4 style='margin-top:0; color:#333;'>Circuit Analysis</h4>")
+            
+            # Create a table for better organization
+            self.phase_angle_widget.append("<table style='width:100%; border-collapse:collapse;'>")
+            
+            # Load type with color coding
             self.phase_angle_widget.append(
-                f"<span style='color:{color};'><b>Load Type:</b> {load_type}</span>"
+                f"<tr><td style='padding:3px 0;'><b>Load Type:</b></td>"
+                f"<td style='padding:3px 0; color:{color};'><b>{load_type}</b></td></tr>"
             )
-            self.phase_angle_widget.append(f"<b>Power Factor:</b> {power_factor:.3f}")
-            self.phase_angle_widget.append(f"<b>Signal Period:</b> {period_ms:.2f} ms")
-            self.phase_angle_widget.append(f"<b>Frequency:</b> {frequency:.1f} Hz")
+            
+            # Power Factor (renamed from PF)
+            self.phase_angle_widget.append(
+                f"<tr><td style='padding:3px 0;'><b>Power Factor:</b></td>"
+                f"<td style='padding:3px 0;'>{power_factor:.3f}</td></tr>"
+            )
+            
+            # Signal metrics
+            self.phase_angle_widget.append(f"<tr><td style='padding:3px 0;'><b>Signal Period:</b></td><td style='padding:3px 0;'>{period_ms:.2f} ms</td></tr>")
+            self.phase_angle_widget.append(f"<tr><td style='padding:3px 0;'><b>Frequency:</b></td><td style='padding:3px 0;'>{frequency:.1f} Hz</td></tr>")
+            
+            # Add current analysis section
+            self.phase_angle_widget.append("</table>")
+            self.phase_angle_widget.append("</div>")
+            
+            # Current Analysis Section
+            self.phase_angle_widget.append("<div style='margin-top:10px; padding:8px; background-color:#f0f8ff; border-radius:4px;'>")
+            self.phase_angle_widget.append("<h4 style='margin-top:0; color:#0066cc;'>Current Analysis</h4>")
+            
+            # Create a table for current metrics
+            self.phase_angle_widget.append("<table style='width:100%; border-collapse:collapse;'>")
+            
+            # Calibration factor (with note that it can be changed)
+            if not hasattr(self, 'calibration_factor'):
+                self.calibration_factor = 2.5
+                
+            self.phase_angle_widget.append(
+                f"<tr><td style='padding:3px 0;'><b>Calibration Factor:</b></td>"
+                f"<td style='padding:3px 0;'>{self.calibration_factor:.2f} kA/V</td></tr>"
+            )
+            
+            # Current peak and RMS values
+            self.phase_angle_widget.append(f"<tr><td style='padding:3px 0;'><b>Current Peak:</b></td><td style='padding:3px 0;'>{current_peak:.2f} kA</td></tr>")
+            self.phase_angle_widget.append(f"<tr><td style='padding:3px 0;'><b>Effective Value:</b></td><td style='padding:3px 0;'>{current_rms:.2f} kA</td></tr>")
+            
+            # ADC signal amplitude
+            self.phase_angle_widget.append(f"<tr><td style='padding:3px 0;'><b>Signal Amplitude:</b></td><td style='padding:3px 0;'>{signal_amplitude:.2f} V</td></tr>")
+            
+            # Close the table and div
+            self.phase_angle_widget.append("</table>")
+            self.phase_angle_widget.append("</div>")
         else:
             self.phase_angle_widget.append(
                 "<b>Phase Angle:</b> Could not calculate - insufficient data pairs"
             )
 
     def toggle_signal_view(self):
+        """Toggle between raw ADC signal and integrated current signal"""
         self.showing_integrated = not self.showing_integrated
 
         if self.showing_integrated:
@@ -1336,16 +1854,23 @@ class LivePlotter(QWidget):
             # Update button text
             self.signal_toggle_btn.setText("Show Current (kA)")
             
-            # Update the zero-crossing detection and phase angle analysis with the raw data
-            self.process_arc_analysis()
+            # Switch back to raw signal
+            if self.offset_correction_enabled:
+                plot_data = [(v - self.adc_offset) * 2 for v in self.adc_signal_data]  # Apply offset correction and scaling
+            else:
+                plot_data = [v * 2 for v in self.adc_signal_data]  # Just apply scaling
+            self.adc_curve.setData(self.adc_time_data, plot_data)
+            self.plot_widget.setLabel('left', 'Voltage', units='V')
+        
+        # Update the signal widget
+        self.update_signal_widget()
 
     def toggle_offset_correction(self):
-        """Toggle offset correction for ADC signal."""
+        """Toggle offset correction for the ADC signal"""
         self.offset_correction_enabled = not self.offset_correction_enabled
 
         if self.offset_correction_enabled:
             self.offset_correction_btn.setText("Remove Offset Correction")
-            self.calculate_adc_offset()
 
             # Apply correction immediately
             if not self.showing_integrated:
@@ -1481,7 +2006,10 @@ class LivePlotter(QWidget):
             return 0.0
             
         avg_period_ms = sum(periods) / len(periods)
-        frequency = 1000.0 / avg_period_ms  # Convert from ms to Hz
+        
+        # Since we're detecting positive-slope zero-crossings, we're only seeing
+        # half-cycles of the fundamental frequency. Divide by 2 to get the true frequency.
+        frequency = (1000.0 / avg_period_ms) / 2.0  # Convert from ms to Hz and adjust for half-cycles
         
         return frequency
 
@@ -1520,7 +2048,7 @@ class LivePlotter(QWidget):
 
         # Skip the first point which was just for continuity
         return timestamps[1:], display_levels[1:], binary_levels[1:]
-
+        
     def closeEvent(self, event):
         # Stop the serial reader first
         if self.serial_reader:
